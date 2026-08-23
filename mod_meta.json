@@ -1,0 +1,9 @@
+{
+  "Author": "Dredd",
+  "Name": "Combined Services",
+  "ModGUID": "dredd.combinedservices",
+  "Entrypoint": "CombinedServices.Main/Initialize",
+  "Version": "0.1.0",
+  "ModAssembly": "CombinedServices.dll",
+  "MinWinchVersion": "0.6.2"
+}
