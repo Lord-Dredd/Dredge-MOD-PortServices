@@ -1,0 +1,6264 @@
+using Winch.Util;
+using HarmonyLib;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using UnityEngine;
+
+namespace CombinedServices
+{
+    public static class Main
+    {
+        private static Harmony harmony;
+
+        public static void Initialize()
+        {
+            harmony =
+                new Harmony(
+                    "dredd.combinedservices"
+                );
+
+            harmony.PatchAll();
+
+            GameObject obj =
+                new GameObject(
+                    "CombinedServicesBehaviour"
+                );
+
+            UnityEngine.Object
+                .DontDestroyOnLoad(
+                    obj
+                );
+
+            obj.AddComponent<
+                CombinedServicesBehaviour
+            >();
+
+            Log(
+                "Port Services initialized."
+            );
+        }
+
+        public static void Log(
+            string message)
+        {
+            try
+            {
+                string logPath =
+                    Path.Combine(
+                        Environment.CurrentDirectory,
+                        "Logs",
+                        "CombinedServices.log"
+                    );
+
+                File.AppendAllText(
+                    logPath,
+                    $"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}"
+                );
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    public class CombinedServicesBehaviour
+        : MonoBehaviour
+    {
+        public static
+            CombinedServicesBehaviour
+            Instance;
+
+        public static
+            DestinationButton
+            LauncherButton;
+
+        // =========================================================
+        // PORT ENTRY
+        // =========================================================
+
+        private enum PortEntryType
+        {
+            Destination,
+            Speaker
+        }
+
+        private class PortEntry
+        {
+            public string Label;
+
+            public PortEntryType Type;
+
+            // IMPORTANT:
+            // These are the ACTUAL live vanilla buttons.
+            public DestinationButton DestinationButton;
+
+            public SpeakerButton SpeakerButton;
+        }
+
+        // =========================================================
+        // CURRENT PORT
+        // =========================================================
+
+        private Dock currentDock;
+
+        private DockUI currentDockUI;
+
+        private string backButtonLabel =
+            "Back to Vanilla Port";
+
+        private string currentPortDisplayName =
+            "Unknown Port";
+
+        private bool menuOpen =
+            false;
+
+        private bool modRouteActive =
+            false;
+
+        private bool sleepRouteActive =
+            false;
+
+        private bool setupRunning =
+            false;
+
+        private Coroutine setupCoroutine;
+
+        private Coroutine routeWatcherCoroutine;
+
+        // A live vanilla button supplies DREDGE's own UI clips.
+        // Reflection keeps Unity.Localization out of this mod's
+        // required Visual Studio references.
+        private Component vanillaUISoundButton;
+
+        private float lastVanillaUISoundTime =
+            -10f;
+
+        private bool vanillaUISoundFailureLogged =
+            false;
+
+        private readonly
+            List<PortEntry>
+            serviceEntries =
+                new List<PortEntry>();
+
+        private readonly
+            List<PortEntry>
+            peopleEntries =
+                new List<PortEntry>();
+
+        private SubDestinationButton
+            sleepButton;
+
+        private DestinationButton
+            storageButton;
+
+        private SubDestinationButton
+            researchButton;
+
+        // =========================================================
+        // VANILLA DOCK INPUT SHIELD
+        // =========================================================
+
+        private readonly
+            List<Behaviour>
+            frozenDockBehaviours =
+                new List<Behaviour>();
+
+        // =========================================================
+        // ART
+        // =========================================================
+
+        private Texture2D
+            customIconTexture;
+
+        private Sprite
+            customIconSprite;
+
+        private bool
+            customIconLoadAttempted =
+                false;
+
+        // =========================================================
+        // GUI
+        // =========================================================
+
+        private GUIStyle
+            menuButtonStyle;
+
+        private GUIStyle
+            backButtonStyle;
+
+        private GUIStyle
+            sectionLabelStyle;
+
+        private GUIStyle
+            undockMessageStyle;
+
+        private GUIStyle
+            statusHeaderStyle;
+
+        private GUIStyle
+            captainsLogTitleStyle;
+
+        private GUIStyle
+            captainsLogTextStyle;
+
+        private Texture2D
+            normalButtonTexture;
+
+        private Texture2D
+            hoverButtonTexture;
+
+        private Texture2D
+            backButtonTexture;
+
+        private Texture2D
+            panelTexture;
+
+        private Texture2D
+            undockCoverTexture;
+
+        private readonly string[]
+            undockMessages =
+        {
+            "The sea is never empty. It is merely waiting.",
+            "A calm harbor has heard every storm story twice.",
+            "Barnacles add drag. Sailors add details.",
+            "Never trust a gull that knows your name.",
+            "The tide keeps no receipts.",
+            "An octopus has three hearts and no patience for paperwork.",
+            "Red sky at night: someone else forgot the lantern.",
+            "Every fog bank is innocent until it whispers.",
+            "A lighthouse is a warning wrapped in hope.",
+            "Sailors once mistook manatees for mermaids. Long voyages do things to a person.",
+            "The ocean covers most of the world and still wants more.",
+            "No map marks the place where common sense sank.",
+            "The moon pulls the tides. The deep pulls everything else.",
+            "A watched crab pot never fills.",
+            "The safest sea monster is the one in yesterday's story.",
+            "Saltwater cures nothing, but it improves the tale.",
+            "Some knots hold ships. Others hold grudges.",
+            "A ship in harbor is safe. The harbor disagrees.",
+            "The abyss is just the ocean refusing small talk.",
+            "Fish travel in schools. Few graduate.",
+            "Old sailors feared bananas aboard ship. Bananas remain unconcerned.",
+            "The Kraken has denied all allegations.",
+            "If the compass spins, blame magnetism first.",
+            "Every wreck was once somebody's confident departure.",
+            "The sea has no roads, only suggestions.",
+            "Whales sing across vast distances. Mostly about boats.",
+            "A jellyfish has no brain and still avoids taxes.",
+            "Never whistle into the wind unless you want an answer.",
+            "The horizon is always one bad decision away.",
+            "Deep water keeps excellent secrets.",
+            "The tide returns. Lost tackle rarely does.",
+            "A full moon brightens the sea and worsens every rumor.",
+            "Sharks are older than trees. They still dislike splinters.",
+            "The ocean has trenches deeper than mountains are tall.",
+            "Coral reefs are cities built by tiny stubborn architects.",
+            "A nautical mile follows the shape of the Earth. Sensible, for once.",
+            "The word mayday came from a French call for help.",
+            "Starfish can regrow arms. Your boat cannot.",
+            "Some sea turtles navigate with Earth's magnetic field.",
+            "Dolphins sleep with half their brain awake. Dockhands call that Tuesday.",
+            "The Flying Dutchman is always late to port.",
+            "Mermaids prefer witnesses with poor eyesight.",
+            "Sea serpents grow longer with every retelling.",
+            "Davy Jones keeps a locker. Storage fees are unclear.",
+            "Ghost ships never need favorable winds.",
+            "Poseidon accepts no warranty claims.",
+            "A selkie's coat should never be borrowed without asking.",
+            "Sirens dislike earplugs and constructive criticism.",
+            "The Leviathan is not on the guest list.",
+            "Here be dragons. Elsewhere, paperwork.",
+            "Check the bilge before blaming sea spirits.",
+            "The best anchor is useless until dropped.",
+            "A boat floats by displacing water and expectations.",
+            "Depth is measured downward. Courage varies.",
+            "The ocean's blue comes from light, not good manners.",
+            "Bioluminescence is the sea refusing total darkness.",
+            "Most of the deep ocean has never seen sunlight.",
+            "Waves carry energy farther than they carry water.",
+            "The North Star points home, provided home is north.",
+            "Keep one eye on the weather and the other on your cargo.",
+            "Fog is just a cloud that came down to inspect the boat.",
+            "A sailor's shortest route usually becomes the longest story.",
+            "The sea rewards preparation and occasionally nonsense.",
+            "If something knocks beneath the hull, let it finish."
+        };
+
+        private string
+            currentUndockMessage =
+                string.Empty;
+
+        private int
+            lastUndockMessageIndex =
+                -1;
+
+        // =========================================================
+        // CAPTAIN'S LOG / SETTINGS
+        // =========================================================
+
+        private bool
+            showCaptainsLog =
+                false;
+
+        private bool
+            confirmResetStats =
+                false;
+
+        private bool
+            portVisitRecordedForCurrentDock =
+                false;
+
+        private int
+            totalPortVisits =
+                0;
+
+        private int
+            totalSleeps =
+                0;
+
+        private int
+            totalFishMarketTrips =
+                0;
+
+        private readonly
+            Dictionary<string, int>
+            serviceUseCounts =
+                new Dictionary<string, int>();
+
+        private readonly
+            Dictionary<string, int>
+            portVisitCounts =
+                new Dictionary<string, int>();
+
+        private readonly
+            Dictionary<string, string>
+            portDisplayNames =
+                new Dictionary<string, string>();
+
+        private readonly float[]
+            sleepSpeedMultipliers =
+        {
+            1f,
+            8f,
+            20f,
+            40f
+        };
+
+        private readonly string[]
+            sleepSpeedNames =
+        {
+            "Normal",
+            "Fast",
+            "Very Fast",
+            "Instant"
+        };
+
+        private int
+            sleepSpeedIndex =
+                3;
+
+        private readonly int[]
+            wakeHourOptions =
+        {
+            5,
+            6,
+            7,
+            8
+        };
+
+        private int
+            wakeHourIndex =
+                1;
+
+        // =========================================================
+        // FAST TRANSITIONS
+        // =========================================================
+
+        private Coroutine
+            speedCoroutine;
+
+        private Coroutine
+            textCoroutine;
+
+        private bool
+            speedBoostActive =
+                false;
+
+        private float
+            oldTimeScale =
+                1f;
+
+        private const float
+            FAST_SPEED =
+                8f;
+
+        private const float
+            ENTRY_SPEED_TIME =
+                0.18f;
+
+        private const float
+            EXIT_SPEED_TIME =
+                0.20f;
+
+        private const float
+            TEXT_SKIP_TIME =
+                1.25f;
+
+        // =========================================================
+        // LAUNCHER SELF HEAL
+        // =========================================================
+
+        private float
+            nextLauncherCheck =
+                0f;
+
+        private const float
+            LAUNCHER_CHECK_INTERVAL =
+                0.5f;
+
+        private float
+            nextLauncherPositionCheck =
+                0f;
+
+        private const float
+            LAUNCHER_POSITION_CHECK_INTERVAL =
+                0.35f;
+
+        private bool
+            launcherPositionValid =
+                false;
+
+        private Vector3
+            cachedLauncherPosition;
+
+        private readonly Vector2[]
+            launcherCandidateAnchors =
+        {
+            new Vector2(0.50f, 0.34f),
+            new Vector2(0.50f, 0.42f),
+            new Vector2(0.33f, 0.30f),
+            new Vector2(0.67f, 0.30f),
+            new Vector2(0.18f, 0.28f),
+            new Vector2(0.82f, 0.28f),
+            new Vector2(0.18f, 0.50f),
+            new Vector2(0.82f, 0.50f),
+            new Vector2(0.25f, 0.72f),
+            new Vector2(0.75f, 0.72f),
+            new Vector2(0.50f, 0.74f)
+        };
+
+        // =========================================================
+        // FORGE
+        // =========================================================
+
+        private readonly KeyCode[]
+            forgeSequence =
+        {
+            KeyCode.F,
+            KeyCode.O,
+            KeyCode.R,
+            KeyCode.G,
+            KeyCode.E
+        };
+
+        private int
+            forgePosition =
+                0;
+
+        private bool
+            showForgeMessage =
+                false;
+
+        private float
+            forgeMessageUntil =
+                0f;
+
+        // =========================================================
+        // START
+        // =========================================================
+
+        private void Awake()
+        {
+            Instance =
+                this;
+
+            LoadCustomIcon();
+
+            CreateGuiTextures();
+
+            LoadCaptainsLog();
+        }
+
+        private void Update()
+        {
+            SelfHealLauncher();
+
+            if (showForgeMessage &&
+                Time.unscaledTime >=
+                forgeMessageUntil)
+            {
+                showForgeMessage =
+                    false;
+            }
+
+            // =====================================================
+            // PORT SERVICES MENU OPEN
+            // =====================================================
+
+            if (menuOpen)
+            {
+                CheckForgeSequence();
+
+                // Escape returns to vanilla. X is deliberately
+                // consumed while Port Services is open so it cannot
+                // trigger the vanilla undock action underneath.
+                if (Input.GetKeyDown(
+                    KeyCode.Escape))
+                {
+                    if (showCaptainsLog)
+                    {
+                        PlayVanillaUISound(
+                            false
+                        );
+
+                        showCaptainsLog =
+                            false;
+
+                        confirmResetStats =
+                            false;
+                    }
+                    else
+                    {
+                        ClosePortServicesToVanilla();
+                    }
+                }
+
+                if (Input.GetKeyDown(
+                    KeyCode.X))
+                {
+                    Main.Log(
+                        "Blocked vanilla undock input while Port Services was open."
+                    );
+                }
+
+                return;
+            }
+
+            forgePosition =
+                0;
+
+            // F5 emergency shortcut.
+            if (!Input.GetKeyDown(
+                KeyCode.F5))
+            {
+                return;
+            }
+
+            if (!PlayerIsDocked())
+            {
+                return;
+            }
+
+            currentDock =
+                GameManager.Instance
+                    .Player
+                    .CurrentDock;
+
+            currentDockUI =
+                GameManager.Instance
+                    .UI
+                    .DockUI;
+
+            RefreshEntries();
+
+            OpenPortServicesOverlay();
+        }
+
+        // =========================================================
+        // GENERAL HELPERS
+        // =========================================================
+
+        private void PlayVanillaUISound(
+            bool openingSound)
+        {
+            // Stops two callbacks in the same frame from stacking
+            // the same short vanilla UI sound.
+            if (Time.unscaledTime -
+                    lastVanillaUISoundTime <
+                0.04f)
+            {
+                return;
+            }
+
+            try
+            {
+                Component source =
+                    GetVanillaUISoundButton();
+
+                if (source ==
+                    null)
+                {
+                    return;
+                }
+
+                MethodInfo method =
+                    AccessTools.Method(
+                        source.GetType(),
+                        openingSound
+                            ? "PlaySelectSFX"
+                            : "PlaySubmitSFX"
+                    );
+
+                if (method ==
+                    null)
+                {
+                    return;
+                }
+
+                method.Invoke(
+                    source,
+                    null
+                );
+
+                lastVanillaUISoundTime =
+                    Time.unscaledTime;
+            }
+            catch (Exception ex)
+            {
+                if (!vanillaUISoundFailureLogged)
+                {
+                    vanillaUISoundFailureLogged =
+                        true;
+
+                    Main.Log(
+                        $"Vanilla UI sound lookup failed: {ex.Message}"
+                    );
+                }
+            }
+        }
+
+        private Component GetVanillaUISoundButton()
+        {
+            if (vanillaUISoundButton !=
+                    null &&
+                vanillaUISoundButton.gameObject !=
+                    null)
+            {
+                return vanillaUISoundButton;
+            }
+
+            Type wrapperType =
+                AccessTools.TypeByName(
+                    "BasicButtonWrapper"
+                );
+
+            if (wrapperType ==
+                null)
+            {
+                return null;
+            }
+
+            if (LauncherButton !=
+                null)
+            {
+                vanillaUISoundButton =
+                    LauncherButton.GetComponent(
+                        wrapperType
+                    );
+
+                if (vanillaUISoundButton !=
+                    null)
+                {
+                    return vanillaUISoundButton;
+                }
+            }
+
+            UnityEngine.Object[] candidates =
+                Resources.FindObjectsOfTypeAll(
+                    wrapperType
+                );
+
+            foreach (UnityEngine.Object candidate
+                     in candidates)
+            {
+                Component component =
+                    candidate as Component;
+
+                if (component ==
+                        null ||
+                    component.gameObject ==
+                        null ||
+                    !component.gameObject
+                        .activeInHierarchy)
+                {
+                    continue;
+                }
+
+                vanillaUISoundButton =
+                    component;
+
+                return vanillaUISoundButton;
+            }
+
+            return null;
+        }
+
+        private bool PlayerIsDocked()
+        {
+            return
+                GameManager.Instance !=
+                    null &&
+                GameManager.Instance.Player !=
+                    null &&
+                GameManager.Instance.Player
+                    .CurrentDock !=
+                    null;
+        }
+
+        private bool DockWindowShowing()
+        {
+            if (GameManager.Instance ==
+                null)
+            {
+                return false;
+            }
+
+            return
+                GameManager.Instance.UI
+                    .ShowingWindowTypes
+                    .Contains(
+                        UIWindowType.DOCK
+                    );
+        }
+
+        private bool DialogueShowing()
+        {
+            if (GameManager.Instance ==
+                null)
+            {
+                return false;
+            }
+
+            return
+                GameManager.Instance.UI
+                    .ShowingWindowTypes
+                    .Contains(
+                        UIWindowType.DIALOGUE
+                    );
+        }
+
+        private bool DockUiFinishedRebuilding()
+        {
+            if (currentDockUI ==
+                    null ||
+                !DockWindowShowing())
+            {
+                return false;
+            }
+
+            try
+            {
+                var pendingField =
+                    AccessTools.Field(
+                        typeof(DockUI),
+                        "isShowPending"
+                    );
+
+                if (pendingField !=
+                        null &&
+                    (bool)pendingField
+                        .GetValue(
+                            currentDockUI
+                        ))
+                {
+                    return false;
+                }
+
+                var objectsField =
+                    AccessTools.Field(
+                        typeof(DockUI),
+                        "destinationButtonObjects"
+                    );
+
+                List<GameObject> objects =
+                    objectsField !=
+                            null
+                        ? objectsField
+                            .GetValue(
+                                currentDockUI
+                            ) as List<GameObject>
+                        : null;
+
+                if (objects ==
+                    null)
+                {
+                    return false;
+                }
+
+                foreach (GameObject obj
+                         in objects)
+                {
+                    if (obj ==
+                            null ||
+                        !obj.activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    if (obj.name ==
+                        "CombinedServices.PortServicesLauncher")
+                    {
+                        continue;
+                    }
+
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Dock rebuild check failed: {ex.Message}"
+                );
+            }
+
+            return false;
+        }
+
+        private void FreezeVanillaDockInput()
+        {
+            frozenDockBehaviours.Clear();
+
+            if (currentDockUI ==
+                null)
+            {
+                return;
+            }
+
+            try
+            {
+                Behaviour[] behaviours =
+                    currentDockUI
+                        .GetComponentsInChildren<
+                            Behaviour
+                        >(true);
+
+                foreach (Behaviour behaviour
+                         in behaviours)
+                {
+                    if (behaviour ==
+                        null)
+                    {
+                        continue;
+                    }
+
+                    if (behaviour ==
+                        currentDockUI)
+                    {
+                        continue;
+                    }
+
+                    if (!behaviour.enabled)
+                    {
+                        continue;
+                    }
+
+                    behaviour.enabled =
+                        false;
+
+                    frozenDockBehaviours.Add(
+                        behaviour
+                    );
+                }
+
+                Main.Log(
+                    $"Port Services input shield enabled. Disabled {frozenDockBehaviours.Count} vanilla UI behaviours."
+                );
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Port Services input shield failed: {ex.Message}"
+                );
+            }
+        }
+
+        private void UnfreezeVanillaDockInput()
+        {
+            foreach (Behaviour behaviour
+                     in frozenDockBehaviours)
+            {
+                if (behaviour ==
+                    null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    behaviour.enabled =
+                        true;
+                }
+                catch
+                {
+                }
+            }
+
+            frozenDockBehaviours.Clear();
+
+            Main.Log(
+                "Port Services input shield disabled."
+            );
+        }
+
+        public bool ShouldBlockVanillaButtonClicks()
+        {
+            return menuOpen;
+        }
+
+        public bool ShouldBlockUndock()
+        {
+            return menuOpen;
+        }
+
+        // =========================================================
+        // GUI TEXTURES
+        // =========================================================
+
+        private void CreateGuiTextures()
+        {
+            normalButtonTexture =
+                MakeTexture(
+                    new Color(
+                        0.58f,
+                        0.30f,
+                        0.07f,
+                        1f
+                    )
+                );
+
+            hoverButtonTexture =
+                MakeTexture(
+                    new Color(
+                        0.76f,
+                        0.43f,
+                        0.10f,
+                        1f
+                    )
+                );
+
+            backButtonTexture =
+                MakeTexture(
+                    new Color(
+                        0.35f,
+                        0.12f,
+                        0.08f,
+                        1f
+                    )
+                );
+
+            panelTexture =
+                MakeTexture(
+                    new Color(
+                        0.015f,
+                        0.015f,
+                        0.015f,
+                        0.96f
+                    )
+                );
+
+            undockCoverTexture =
+                MakeTexture(
+                    new Color(
+                        0f,
+                        0f,
+                        0f,
+                        1f
+                    )
+                );
+        }
+
+        private Texture2D MakeTexture(
+            Color colour)
+        {
+            Texture2D texture =
+                new Texture2D(
+                    1,
+                    1,
+                    TextureFormat.ARGB32,
+                    false
+                );
+
+            texture.SetPixel(
+                0,
+                0,
+                colour
+            );
+
+            texture.Apply();
+
+            return texture;
+        }
+
+        // =========================================================
+        // GUI STYLES
+        // =========================================================
+
+        private void EnsureGuiStyles()
+        {
+            if (menuButtonStyle !=
+                null)
+            {
+                return;
+            }
+
+            menuButtonStyle =
+                new GUIStyle(
+                    GUI.skin.button
+                );
+
+            menuButtonStyle.alignment =
+                TextAnchor.MiddleCenter;
+
+            menuButtonStyle.fontStyle =
+                FontStyle.Bold;
+
+            menuButtonStyle.fontSize =
+                Mathf.RoundToInt(
+                    Mathf.Clamp(
+                        Screen.height *
+                        0.021f,
+                        15f,
+                        24f
+                    )
+                );
+
+            menuButtonStyle.normal
+                .textColor =
+                    Color.white;
+
+            menuButtonStyle.hover
+                .textColor =
+                    Color.white;
+
+            menuButtonStyle.active
+                .textColor =
+                    Color.white;
+
+            menuButtonStyle.normal
+                .background =
+                    normalButtonTexture;
+
+            menuButtonStyle.hover
+                .background =
+                    hoverButtonTexture;
+
+            menuButtonStyle.active
+                .background =
+                    hoverButtonTexture;
+
+            backButtonStyle =
+                new GUIStyle(
+                    menuButtonStyle
+                );
+
+            backButtonStyle.normal
+                .background =
+                    backButtonTexture;
+
+            backButtonStyle.hover
+                .background =
+                    hoverButtonTexture;
+
+            sectionLabelStyle =
+                new GUIStyle(
+                    GUI.skin.label
+                );
+
+            sectionLabelStyle.fontStyle =
+                FontStyle.Bold;
+
+            sectionLabelStyle.fontSize =
+                Mathf.RoundToInt(
+                    Mathf.Clamp(
+                        Screen.height *
+                        0.018f,
+                        14f,
+                        21f
+                    )
+                );
+
+            sectionLabelStyle.normal
+                .textColor =
+                    Color.white;
+
+            sectionLabelStyle.alignment =
+                TextAnchor.MiddleLeft;
+
+            undockMessageStyle =
+                new GUIStyle(
+                    GUI.skin.label
+                );
+
+            undockMessageStyle.alignment =
+                TextAnchor.MiddleCenter;
+
+            undockMessageStyle.fontStyle =
+                FontStyle.Italic;
+
+            undockMessageStyle.fontSize =
+                Mathf.RoundToInt(
+                    Mathf.Clamp(
+                        Screen.height *
+                        0.016f,
+                        13f,
+                        18f
+                    )
+                );
+
+            undockMessageStyle.wordWrap =
+                true;
+
+            undockMessageStyle.normal
+                .textColor =
+                    new Color(
+                        0.93f,
+                        0.82f,
+                        0.58f,
+                        1f
+                    );
+
+            statusHeaderStyle =
+                new GUIStyle(
+                    GUI.skin.label
+                );
+
+            statusHeaderStyle.alignment =
+                TextAnchor.MiddleCenter;
+
+            statusHeaderStyle.fontStyle =
+                FontStyle.Bold;
+
+            statusHeaderStyle.fontSize =
+                Mathf.RoundToInt(
+                    Mathf.Clamp(
+                        Screen.height *
+                        0.014f,
+                        12f,
+                        16f
+                    )
+                );
+
+            statusHeaderStyle.wordWrap =
+                true;
+
+            statusHeaderStyle.normal
+                .textColor =
+                    new Color(
+                        0.93f,
+                        0.82f,
+                        0.58f,
+                        1f
+                    );
+
+            captainsLogTitleStyle =
+                new GUIStyle(
+                    sectionLabelStyle
+                );
+
+            captainsLogTitleStyle.alignment =
+                TextAnchor.MiddleCenter;
+
+            captainsLogTitleStyle.fontSize =
+                Mathf.RoundToInt(
+                    Mathf.Clamp(
+                        Screen.height *
+                        0.028f,
+                        20f,
+                        30f
+                    )
+                );
+
+            captainsLogTitleStyle.normal
+                .textColor =
+                    new Color(
+                        0.93f,
+                        0.82f,
+                        0.58f,
+                        1f
+                    );
+
+            captainsLogTextStyle =
+                new GUIStyle(
+                    GUI.skin.label
+                );
+
+            captainsLogTextStyle.alignment =
+                TextAnchor.MiddleLeft;
+
+            captainsLogTextStyle.fontSize =
+                Mathf.RoundToInt(
+                    Mathf.Clamp(
+                        Screen.height *
+                        0.018f,
+                        14f,
+                        20f
+                    )
+                );
+
+            captainsLogTextStyle.normal
+                .textColor =
+                    Color.white;
+        }
+
+        // =========================================================
+        // GUI
+        // =========================================================
+
+        private void OnGUI()
+        {
+            EnsureGuiStyles();
+
+            if (menuOpen)
+            {
+                if (showCaptainsLog)
+                {
+                    bool previousGuiEnabled =
+                        GUI.enabled;
+
+                    GUI.enabled =
+                        false;
+
+                    DrawPortServices();
+
+                    GUI.enabled =
+                        previousGuiEnabled;
+
+                    DrawCaptainsLog();
+                }
+                else
+                {
+                    DrawPortServices();
+                }
+
+                DrawUndockPromptCover();
+            }
+
+            if (showForgeMessage)
+            {
+                DrawForgeMessage();
+            }
+        }
+
+        private void DrawUndockPromptCover()
+        {
+            if (undockCoverTexture ==
+                null)
+            {
+                return;
+            }
+
+            float coverWidth =
+                Mathf.Clamp(
+                    Screen.width *
+                    0.20f,
+                    280f,
+                    380f
+                );
+
+            float coverHeight =
+                Mathf.Clamp(
+                    Screen.height *
+                    0.12f,
+                    90f,
+                    130f
+                );
+
+            GUI.DrawTexture(
+                new Rect(
+                    Screen.width -
+                        coverWidth,
+                    Screen.height -
+                        coverHeight,
+                    coverWidth,
+                    coverHeight
+                ),
+                undockCoverTexture
+            );
+
+            if (!string.IsNullOrEmpty(
+                    currentUndockMessage) &&
+                undockMessageStyle !=
+                    null)
+            {
+                GUI.Label(
+                    new Rect(
+                        Screen.width -
+                            coverWidth +
+                            14f,
+                        Screen.height -
+                            coverHeight +
+                            10f,
+                        coverWidth -
+                            28f,
+                        coverHeight -
+                            20f
+                    ),
+                    currentUndockMessage,
+                    undockMessageStyle
+                );
+            }
+        }
+
+        private string GetPortStatusText()
+        {
+            try
+            {
+                if (GameManager.Instance ==
+                    null)
+                {
+                    return currentPortDisplayName;
+                }
+
+                float normalizedTime =
+                    GameManager.Instance
+                        .Time
+                        .Time;
+
+                int totalMinutes =
+                    Mathf.FloorToInt(
+                        normalizedTime *
+                        24f *
+                        60f
+                    ) %
+                    (24 * 60);
+
+                int hour24 =
+                    totalMinutes /
+                    60;
+
+                int minute =
+                    totalMinutes %
+                    60;
+
+                int hour12 =
+                    hour24 %
+                    12;
+
+                if (hour12 ==
+                    0)
+                {
+                    hour12 =
+                        12;
+                }
+
+                string suffix =
+                    hour24 <
+                            12
+                        ? "AM"
+                        : "PM";
+
+                string timeText =
+                    $"{hour12}:{minute:00} {suffix}";
+
+                decimal funds =
+                    GameManager.Instance
+                        .SaveData
+                        .Funds;
+
+                int hullRemaining =
+                    GameManager.Instance
+                        .Player
+                        .RemainingHealth;
+
+                int hullMaximum =
+                    GameManager.Instance
+                        .PlayerStats
+                        .DamageThreshold +
+                    1;
+
+                int cargoUsed;
+                int cargoCapacity;
+
+                GetCargoUsage(
+                    out cargoUsed,
+                    out cargoCapacity
+                );
+
+                int researchParts =
+                    GameManager.Instance
+                        .ResearchHelper
+                        .TotalPartCount;
+
+                return
+                    $"{currentPortDisplayName}  |  {timeText}  |  ${funds:N0}  |  Hull {hullRemaining}/{hullMaximum}  |  Cargo {cargoUsed}/{cargoCapacity}  |  Research Parts {researchParts}";
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Port status failed: {ex.Message}"
+                );
+
+                return currentPortDisplayName;
+            }
+        }
+
+        private void GetCargoUsage(
+            out int used,
+            out int capacity)
+        {
+            used =
+                0;
+
+            capacity =
+                0;
+
+            if (GameManager.Instance ==
+                    null ||
+                GameManager.Instance.SaveData ==
+                    null ||
+                GameManager.Instance.SaveData
+                    .Inventory ==
+                    null)
+            {
+                return;
+            }
+
+            GridCellData[,] cells =
+                GameManager.Instance
+                    .SaveData
+                    .Inventory
+                    .Grid;
+
+            if (cells ==
+                null)
+            {
+                return;
+            }
+
+            foreach (GridCellData cell
+                     in cells)
+            {
+                if (cell ==
+                        null ||
+                    cell.IsHidden)
+                {
+                    continue;
+                }
+
+                capacity++;
+
+                if (cell.ContainsObject)
+                {
+                    used++;
+                }
+            }
+        }
+
+        private void DrawCaptainsLog()
+        {
+            float width =
+                Mathf.Min(
+                    Screen.width *
+                    0.56f,
+                    720f
+                );
+
+            float height =
+                Mathf.Min(
+                    Screen.height *
+                    0.62f,
+                    580f
+                );
+
+            float x =
+                (Screen.width -
+                width) /
+                2f;
+
+            float y =
+                (Screen.height -
+                height) /
+                2f;
+
+            GUI.DrawTexture(
+                new Rect(
+                    x,
+                    y,
+                    width,
+                    height
+                ),
+                undockCoverTexture
+            );
+
+            GUI.Label(
+                new Rect(
+                    x + 24f,
+                    y + 18f,
+                    width - 48f,
+                    48f
+                ),
+                "CAPTAIN'S LOG",
+                captainsLogTitleStyle
+            );
+
+            float lineHeight =
+                Mathf.Clamp(
+                    Screen.height *
+                    0.038f,
+                    30f,
+                    42f
+                );
+
+            float textX =
+                x + 48f;
+
+            float textWidth =
+                width - 96f;
+
+            float lineY =
+                y + 78f;
+
+            DrawCaptainsLogLine(
+                textX,
+                lineY,
+                textWidth,
+                lineHeight,
+                "Port visits",
+                totalPortVisits.ToString()
+            );
+
+            lineY +=
+                lineHeight;
+
+            DrawCaptainsLogLine(
+                textX,
+                lineY,
+                textWidth,
+                lineHeight,
+                "Sleeps",
+                totalSleeps.ToString()
+            );
+
+            lineY +=
+                lineHeight;
+
+            DrawCaptainsLogLine(
+                textX,
+                lineY,
+                textWidth,
+                lineHeight,
+                "Fish Market trips",
+                totalFishMarketTrips
+                    .ToString()
+            );
+
+            lineY +=
+                lineHeight;
+
+            DrawCaptainsLogLine(
+                textX,
+                lineY,
+                textWidth,
+                lineHeight,
+                "Most-used service",
+                GetMostUsedService()
+            );
+
+            lineY +=
+                lineHeight;
+
+            DrawCaptainsLogLine(
+                textX,
+                lineY,
+                textWidth,
+                lineHeight,
+                "Favorite port",
+                GetFavoritePort()
+            );
+
+            lineY +=
+                lineHeight +
+                12f;
+
+            GUI.Label(
+                new Rect(
+                    textX,
+                    lineY,
+                    textWidth,
+                    lineHeight
+                ),
+                "SLEEP SETTINGS",
+                sectionLabelStyle
+            );
+
+            lineY +=
+                lineHeight +
+                4f;
+
+            float settingsButtonWidth =
+                (textWidth -
+                12f) /
+                2f;
+
+            if (GUI.Button(
+                new Rect(
+                    textX,
+                    lineY,
+                    settingsButtonWidth,
+                    lineHeight + 10f
+                ),
+                $"Speed: {sleepSpeedNames[sleepSpeedIndex]} ({sleepSpeedMultipliers[sleepSpeedIndex]:0}x)",
+                menuButtonStyle))
+            {
+                PlayVanillaUISound(
+                    false
+                );
+
+                sleepSpeedIndex =
+                    (sleepSpeedIndex +
+                    1) %
+                    sleepSpeedMultipliers
+                        .Length;
+
+                SaveCaptainsLog();
+            }
+
+            if (GUI.Button(
+                new Rect(
+                    textX +
+                        settingsButtonWidth +
+                        12f,
+                    lineY,
+                    settingsButtonWidth,
+                    lineHeight + 10f
+                ),
+                $"Wake: {FormatWakeHour(wakeHourOptions[wakeHourIndex])}",
+                menuButtonStyle))
+            {
+                PlayVanillaUISound(
+                    false
+                );
+
+                wakeHourIndex =
+                    (wakeHourIndex +
+                    1) %
+                    wakeHourOptions
+                        .Length;
+
+                SaveCaptainsLog();
+            }
+
+            float footerButtonWidth =
+                Mathf.Min(
+                    250f,
+                    (width -
+                    84f) /
+                    2f
+                );
+
+            float footerGap =
+                18f;
+
+            float footerX =
+                x +
+                ((width -
+                ((footerButtonWidth *
+                2f) +
+                footerGap)) /
+                2f);
+
+            if (GUI.Button(
+                new Rect(
+                    footerX,
+                    y +
+                        height -
+                        70f,
+                    footerButtonWidth,
+                    48f
+                ),
+                confirmResetStats
+                    ? "Confirm Reset"
+                    : "Reset Statistics",
+                confirmResetStats
+                    ? backButtonStyle
+                    : menuButtonStyle))
+            {
+                PlayVanillaUISound(
+                    false
+                );
+
+                if (confirmResetStats)
+                {
+                    ResetCaptainsLogStatistics();
+
+                    confirmResetStats =
+                        false;
+                }
+                else
+                {
+                    confirmResetStats =
+                        true;
+                }
+            }
+
+            if (GUI.Button(
+                new Rect(
+                    footerX +
+                        footerButtonWidth +
+                        footerGap,
+                    y +
+                        height -
+                        70f,
+                    footerButtonWidth,
+                    48f
+                ),
+                "Back to Services",
+                backButtonStyle))
+            {
+                PlayVanillaUISound(
+                    false
+                );
+
+                showCaptainsLog =
+                    false;
+
+                confirmResetStats =
+                    false;
+            }
+        }
+
+        private void DrawCaptainsLogLine(
+            float x,
+            float y,
+            float width,
+            float height,
+            string label,
+            string value)
+        {
+            GUI.Label(
+                new Rect(
+                    x,
+                    y,
+                    width,
+                    height
+                ),
+                $"{label}:  {value}",
+                captainsLogTextStyle
+            );
+        }
+
+        private string FormatWakeHour(
+            int hour24)
+        {
+            int hour12 =
+                hour24 %
+                12;
+
+            if (hour12 ==
+                0)
+            {
+                hour12 =
+                    12;
+            }
+
+            return
+                $"{hour12}:00 {(hour24 < 12 ? "AM" : "PM")}";
+        }
+
+        private string GetCaptainsLogPath()
+        {
+            return Path.Combine(
+                Environment.CurrentDirectory,
+                "Mods",
+                "dredd.combinedservices",
+                "PortServices.stats"
+            );
+        }
+
+        private void LoadCaptainsLog()
+        {
+            try
+            {
+                string path =
+                    GetCaptainsLogPath();
+
+                if (!File.Exists(
+                    path))
+                {
+                    return;
+                }
+
+                serviceUseCounts.Clear();
+                portVisitCounts.Clear();
+                portDisplayNames.Clear();
+
+                foreach (string line
+                         in File.ReadAllLines(
+                            path
+                         ))
+                {
+                    if (string.IsNullOrWhiteSpace(
+                        line))
+                    {
+                        continue;
+                    }
+
+                    string[] parts =
+                        line.Split(
+                            '|'
+                        );
+
+                    if (parts.Length <
+                        2)
+                    {
+                        continue;
+                    }
+
+                    int value;
+
+                    if (parts[0] ==
+                            "TOTAL_PORT_VISITS" &&
+                        int.TryParse(
+                            parts[1],
+                            out value))
+                    {
+                        totalPortVisits =
+                            Mathf.Max(
+                                0,
+                                value
+                            );
+                    }
+                    else if (parts[0] ==
+                                "TOTAL_SLEEPS" &&
+                             int.TryParse(
+                                parts[1],
+                                out value))
+                    {
+                        totalSleeps =
+                            Mathf.Max(
+                                0,
+                                value
+                            );
+                    }
+                    else if (parts[0] ==
+                                "FISH_MARKET_TRIPS" &&
+                             int.TryParse(
+                                parts[1],
+                                out value))
+                    {
+                        totalFishMarketTrips =
+                            Mathf.Max(
+                                0,
+                                value
+                            );
+                    }
+                    else if (parts[0] ==
+                                "SLEEP_SPEED" &&
+                             int.TryParse(
+                                parts[1],
+                                out value))
+                    {
+                        sleepSpeedIndex =
+                            Mathf.Clamp(
+                                value,
+                                0,
+                                sleepSpeedMultipliers
+                                    .Length -
+                                1
+                            );
+                    }
+                    else if (parts[0] ==
+                                "WAKE_HOUR" &&
+                             int.TryParse(
+                                parts[1],
+                                out value))
+                    {
+                        wakeHourIndex =
+                            Mathf.Clamp(
+                                value,
+                                0,
+                                wakeHourOptions
+                                    .Length -
+                                1
+                            );
+                    }
+                    else if (parts[0] ==
+                                "SERVICE" &&
+                             parts.Length >=
+                                3 &&
+                             int.TryParse(
+                                parts[2],
+                                out value))
+                    {
+                        string label =
+                            Uri.UnescapeDataString(
+                                parts[1]
+                            );
+
+                        serviceUseCounts[
+                            label
+                        ] =
+                            Mathf.Max(
+                                0,
+                                value
+                            );
+                    }
+                    else if (parts[0] ==
+                                "PORT" &&
+                             parts.Length >=
+                                4 &&
+                             int.TryParse(
+                                parts[3],
+                                out value))
+                    {
+                        string id =
+                            Uri.UnescapeDataString(
+                                parts[1]
+                            );
+
+                        string name =
+                            Uri.UnescapeDataString(
+                                parts[2]
+                            );
+
+                        portVisitCounts[
+                            id
+                        ] =
+                            Mathf.Max(
+                                0,
+                                value
+                            );
+
+                        portDisplayNames[
+                            id
+                        ] =
+                            name;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Captain's Log load failed: {ex.Message}"
+                );
+            }
+        }
+
+        private void SaveCaptainsLog()
+        {
+            try
+            {
+                string path =
+                    GetCaptainsLogPath();
+
+                string directory =
+                    Path.GetDirectoryName(
+                        path
+                    );
+
+                if (!string.IsNullOrEmpty(
+                    directory))
+                {
+                    Directory.CreateDirectory(
+                        directory
+                    );
+                }
+
+                List<string> lines =
+                    new List<string>();
+
+                lines.Add(
+                    "VERSION|1"
+                );
+
+                lines.Add(
+                    $"TOTAL_PORT_VISITS|{totalPortVisits}"
+                );
+
+                lines.Add(
+                    $"TOTAL_SLEEPS|{totalSleeps}"
+                );
+
+                lines.Add(
+                    $"FISH_MARKET_TRIPS|{totalFishMarketTrips}"
+                );
+
+                lines.Add(
+                    $"SLEEP_SPEED|{sleepSpeedIndex}"
+                );
+
+                lines.Add(
+                    $"WAKE_HOUR|{wakeHourIndex}"
+                );
+
+                foreach (var pair
+                         in serviceUseCounts)
+                {
+                    lines.Add(
+                        $"SERVICE|{Uri.EscapeDataString(pair.Key)}|{pair.Value}"
+                    );
+                }
+
+                foreach (var pair
+                         in portVisitCounts)
+                {
+                    string name =
+                        portDisplayNames
+                            .ContainsKey(
+                                pair.Key
+                            )
+                            ? portDisplayNames[
+                                pair.Key
+                            ]
+                            : pair.Key;
+
+                    lines.Add(
+                        $"PORT|{Uri.EscapeDataString(pair.Key)}|{Uri.EscapeDataString(name)}|{pair.Value}"
+                    );
+                }
+
+                File.WriteAllLines(
+                    path,
+                    lines.ToArray()
+                );
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Captain's Log save failed: {ex.Message}"
+                );
+            }
+        }
+
+        private void ResetCaptainsLogStatistics()
+        {
+            totalPortVisits =
+                0;
+
+            totalSleeps =
+                0;
+
+            totalFishMarketTrips =
+                0;
+
+            serviceUseCounts.Clear();
+            portVisitCounts.Clear();
+            portDisplayNames.Clear();
+
+            SaveCaptainsLog();
+
+            Main.Log(
+                "Captain's Log statistics reset."
+            );
+        }
+
+        private void RecordPortVisit(
+            Dock dock)
+        {
+            if (dock ==
+                    null ||
+                dock.Data ==
+                    null)
+            {
+                return;
+            }
+
+            string id =
+                !string.IsNullOrWhiteSpace(
+                    dock.Data.Id)
+                    ? dock.Data.Id
+                    : dock.name;
+
+            string name =
+                GetDockDisplayName(
+                    dock
+                );
+
+            totalPortVisits++;
+
+            if (!portVisitCounts.ContainsKey(
+                id))
+            {
+                portVisitCounts[
+                    id
+                ] =
+                    0;
+            }
+
+            portVisitCounts[
+                id
+            ]++;
+
+            portDisplayNames[
+                id
+            ] =
+                name;
+
+            SaveCaptainsLog();
+        }
+
+        private void RecordServiceUse(
+            string label,
+            bool fishMarket)
+        {
+            if (string.IsNullOrWhiteSpace(
+                label))
+            {
+                label =
+                    "Unknown Service";
+            }
+
+            if (!serviceUseCounts.ContainsKey(
+                label))
+            {
+                serviceUseCounts[
+                    label
+                ] =
+                    0;
+            }
+
+            serviceUseCounts[
+                label
+            ]++;
+
+            if (fishMarket)
+            {
+                totalFishMarketTrips++;
+            }
+
+            SaveCaptainsLog();
+        }
+
+        private void RecordCompletedSleep()
+        {
+            totalSleeps++;
+
+            RecordServiceUse(
+                "Sleep",
+                false
+            );
+        }
+
+        private string GetMostUsedService()
+        {
+            if (serviceUseCounts.Count ==
+                0)
+            {
+                return "None yet";
+            }
+
+            return serviceUseCounts
+                .OrderByDescending(
+                    pair =>
+                        pair.Value
+                )
+                .ThenBy(
+                    pair =>
+                        pair.Key
+                )
+                .First()
+                .Key;
+        }
+
+        private string GetFavoritePort()
+        {
+            if (portVisitCounts.Count ==
+                0)
+            {
+                return "None yet";
+            }
+
+            string id =
+                portVisitCounts
+                    .OrderByDescending(
+                        pair =>
+                            pair.Value
+                    )
+                    .ThenBy(
+                        pair =>
+                            pair.Key
+                    )
+                    .First()
+                    .Key;
+
+            return portDisplayNames
+                .ContainsKey(
+                    id
+                )
+                ? portDisplayNames[
+                    id
+                ]
+                : CleanName(
+                    id
+                );
+        }
+
+        private void DrawPortServices()
+        {
+            float panelWidth =
+                Mathf.Min(
+                    Screen.width *
+                    0.78f,
+                    1260f
+                );
+
+            float panelHeight =
+                Mathf.Min(
+                    Screen.height *
+                    0.72f,
+                    720f
+                );
+
+            float panelX =
+                (Screen.width -
+                panelWidth) /
+                2f;
+
+            float panelY =
+                (Screen.height -
+                panelHeight) /
+                2f;
+
+            GUI.DrawTexture(
+                new Rect(
+                    panelX,
+                    panelY,
+                    panelWidth,
+                    panelHeight
+                ),
+                panelTexture
+            );
+
+            float buttonHeight =
+                Mathf.Clamp(
+                    Screen.height *
+                    0.05f,
+                    42f,
+                    58f
+                );
+
+            // =====================================================
+            // BACK TO VANILLA
+            // =====================================================
+
+            float desiredBackWidth =
+                backButtonStyle
+                    .CalcSize(
+                        new GUIContent(
+                            backButtonLabel
+                        )
+                    )
+                    .x +
+                    30f;
+
+            float backWidth =
+                Mathf.Clamp(
+                    desiredBackWidth,
+                    235f,
+                    Mathf.Min(
+                        430f,
+                        panelWidth *
+                        0.45f
+                    )
+                );
+
+            if (GUI.Button(
+                new Rect(
+                    panelX + 18f,
+                    panelY + 18f,
+                    backWidth,
+                    buttonHeight
+                ),
+                backButtonLabel,
+                backButtonStyle))
+            {
+                ClosePortServicesToVanilla();
+
+                return;
+            }
+
+            float logButtonWidth =
+                Mathf.Min(
+                    220f,
+                    panelWidth *
+                    0.22f
+                );
+
+            float logButtonX =
+                panelX +
+                panelWidth -
+                logButtonWidth -
+                18f;
+
+            if (GUI.Button(
+                new Rect(
+                    logButtonX,
+                    panelY + 18f,
+                    logButtonWidth,
+                    buttonHeight
+                ),
+                "Captain's Log",
+                backButtonStyle))
+            {
+                PlayVanillaUISound(
+                    false
+                );
+
+                showCaptainsLog =
+                    true;
+
+                confirmResetStats =
+                    false;
+
+                return;
+            }
+
+            float statusX =
+                panelX +
+                30f +
+                backWidth;
+
+            float statusWidth =
+                logButtonX -
+                statusX -
+                12f;
+
+            if (statusWidth >
+                80f)
+            {
+                GUI.Label(
+                    new Rect(
+                        statusX,
+                        panelY + 18f,
+                        statusWidth,
+                        buttonHeight
+                    ),
+                    GetPortStatusText(),
+                    statusHeaderStyle
+                );
+            }
+
+            // =====================================================
+            // PEOPLE - TOP
+            // =====================================================
+
+            float peopleLabelY =
+                panelY +
+                82f;
+
+            GUI.Label(
+                new Rect(
+                    panelX + 22f,
+                    peopleLabelY,
+                    panelWidth -
+                    44f,
+                    30f
+                ),
+                "People / Port Interactions",
+                sectionLabelStyle
+            );
+
+            DrawEntryRow(
+                peopleEntries,
+                panelX + 20f,
+                peopleLabelY + 32f,
+                panelWidth - 40f,
+                panelHeight * 0.22f,
+                buttonHeight
+            );
+
+            // =====================================================
+            // PORT SERVICES ART
+            // =====================================================
+
+            if (customIconTexture !=
+                null)
+            {
+                float imageSize =
+                    Mathf.Min(
+                        panelWidth *
+                        0.26f,
+                        panelHeight *
+                        0.33f
+                    );
+
+                float imageX =
+                    panelX +
+                    ((panelWidth -
+                    imageSize) /
+                    2f);
+
+                float imageY =
+                    panelY +
+                    (panelHeight *
+                    0.335f);
+
+                GUI.DrawTexture(
+                    new Rect(
+                        imageX,
+                        imageY,
+                        imageSize,
+                        imageSize
+                    ),
+                    customIconTexture,
+                    ScaleMode.ScaleToFit,
+                    true
+                );
+            }
+
+            // =====================================================
+            // CUSTOM CENTER BUTTONS
+            // =====================================================
+
+            if (customIconTexture !=
+                null)
+            {
+                float centerImageSize =
+                    Mathf.Min(
+                        panelWidth *
+                        0.26f,
+                        panelHeight *
+                        0.33f
+                    );
+
+                float centerImageX =
+                    panelX +
+                    ((panelWidth -
+                    centerImageSize) /
+                    2f);
+
+                float centerImageY =
+                    panelY +
+                    (panelHeight *
+                    0.335f);
+
+                float sideButtonWidth =
+                    Mathf.Clamp(
+                        panelWidth *
+                        0.19f,
+                        170f,
+                        245f
+                    );
+
+                float sideButtonHeight =
+                    buttonHeight;
+
+                float sideButtonY =
+                    centerImageY +
+                    (centerImageSize /
+                    2f) -
+                    (sideButtonHeight /
+                    2f);
+
+                float sleepButtonX =
+                    centerImageX -
+                    sideButtonWidth -
+                    28f;
+
+                float leaveButtonX =
+                    centerImageX +
+                    centerImageSize +
+                    28f;
+
+                float centerButtonX =
+                    panelX +
+                    ((panelWidth -
+                    sideButtonWidth) /
+                    2f);
+
+                float storageButtonY =
+                    centerImageY -
+                    sideButtonHeight -
+                    10f;
+
+                float researchButtonY =
+                    centerImageY +
+                    centerImageSize +
+                    10f;
+
+                if (GUI.Button(
+                    new Rect(
+                        sleepButtonX,
+                        sideButtonY,
+                        sideButtonWidth,
+                        sideButtonHeight
+                    ),
+                    "Sleep",
+                    menuButtonStyle))
+                {
+                    ActivateSleep();
+                    return;
+                }
+
+                if (GUI.Button(
+                    new Rect(
+                        leaveButtonX,
+                        sideButtonY,
+                        sideButtonWidth,
+                        sideButtonHeight
+                    ),
+                    "Leave Port",
+                    backButtonStyle))
+                {
+                    ActivateLeavePort();
+                    return;
+                }
+
+                bool previousGuiEnabled =
+                    GUI.enabled;
+
+                GUI.enabled =
+                    previousGuiEnabled &&
+                    storageButton !=
+                        null;
+
+                bool storageClicked =
+                    GUI.Button(
+                        new Rect(
+                            centerButtonX,
+                            storageButtonY,
+                            sideButtonWidth,
+                            sideButtonHeight
+                        ),
+                        "Storage",
+                        menuButtonStyle
+                    );
+
+                GUI.enabled =
+                    previousGuiEnabled;
+
+                if (storageClicked)
+                {
+                    ActivateStorage();
+                    return;
+                }
+
+                GUI.enabled =
+                    previousGuiEnabled &&
+                    researchButton !=
+                        null;
+
+                bool researchClicked =
+                    GUI.Button(
+                        new Rect(
+                            centerButtonX,
+                            researchButtonY,
+                            sideButtonWidth,
+                            sideButtonHeight
+                        ),
+                        "Research",
+                        menuButtonStyle
+                    );
+
+                GUI.enabled =
+                    previousGuiEnabled;
+
+                if (researchClicked)
+                {
+                    ActivateResearch();
+                    return;
+                }
+            }
+
+            // =====================================================
+            // SERVICES - BOTTOM
+            // =====================================================
+
+            float servicesLabelY =
+                panelY +
+                panelHeight -
+                160f;
+
+            GUI.Label(
+                new Rect(
+                    panelX + 22f,
+                    servicesLabelY,
+                    panelWidth -
+                    44f,
+                    30f
+                ),
+                "Services",
+                sectionLabelStyle
+            );
+
+            DrawEntryRow(
+                serviceEntries,
+                panelX + 20f,
+                servicesLabelY + 31f,
+                panelWidth - 40f,
+                panelY +
+                    panelHeight -
+                    servicesLabelY -
+                    49f,
+                buttonHeight
+            );
+        }
+
+        private void DrawEntryRow(
+            List<PortEntry> entries,
+            float x,
+            float y,
+            float width,
+            float availableHeight,
+            float buttonHeight)
+        {
+            if (entries.Count ==
+                0)
+            {
+                GUI.Label(
+                    new Rect(
+                        x,
+                        y,
+                        width,
+                        buttonHeight
+                    ),
+                    "None currently available.",
+                    sectionLabelStyle
+                );
+
+                return;
+            }
+
+            const int maxPerRow =
+                4;
+
+            float spacing =
+                8f;
+
+            int row =
+                0;
+
+            int column =
+                0;
+
+            int currentRowCount =
+                Mathf.Min(
+                    maxPerRow,
+                    entries.Count
+                );
+
+            float buttonWidth =
+                (width -
+                (spacing *
+                (currentRowCount -
+                1))) /
+                currentRowCount;
+
+            for (int i = 0;
+                 i < entries.Count;
+                 i++)
+            {
+                if (column >=
+                    maxPerRow)
+                {
+                    row++;
+
+                    column =
+                        0;
+
+                    int remaining =
+                        entries.Count -
+                        i;
+
+                    currentRowCount =
+                        Mathf.Min(
+                            maxPerRow,
+                            remaining
+                        );
+
+                    buttonWidth =
+                        (width -
+                        (spacing *
+                        (currentRowCount -
+                        1))) /
+                        currentRowCount;
+                }
+
+                float bx =
+                    x +
+                    (column *
+                    (buttonWidth +
+                    spacing));
+
+                float by =
+                    y +
+                    (row *
+                    (buttonHeight +
+                    spacing));
+
+                if (by +
+                    buttonHeight >
+                    y +
+                    availableHeight)
+                {
+                    break;
+                }
+
+                PortEntry entry =
+                    entries[i];
+
+                if (GUI.Button(
+                    new Rect(
+                        bx,
+                        by,
+                        buttonWidth,
+                        buttonHeight
+                    ),
+                    entry.Label,
+                    menuButtonStyle))
+                {
+                    ActivateEntry(
+                        entry
+                    );
+
+                    return;
+                }
+
+                column++;
+            }
+        }
+
+        // =========================================================
+        // THE IMPORTANT PART
+        //
+        // WE CLICK THE EXACT VANILLA BUTTON THAT
+        // WAS ALREADY ON THE DOCK.
+        // =========================================================
+
+        private void ActivateSleep()
+        {
+            if (!PlayerIsDocked() ||
+                currentDockUI ==
+                    null)
+            {
+                return;
+            }
+
+            FindSleepButton();
+
+            if (sleepButton ==
+                null)
+            {
+                Main.Log(
+                    "Sleep button clicked, but no RestDestination was found."
+                );
+
+                return;
+            }
+
+            PlayVanillaUISound(
+                false
+            );
+
+            menuOpen =
+                false;
+
+            modRouteActive =
+                true;
+
+            sleepRouteActive =
+                true;
+
+            UnfreezeVanillaDockInput();
+
+            StopSpeedEffects();
+
+            if (routeWatcherCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    routeWatcherCoroutine
+                );
+            }
+
+            BeginSpeedBoost(
+                sleepSpeedMultipliers[
+                    sleepSpeedIndex
+                ]
+            );
+
+            try
+            {
+                MethodInfo method =
+                    AccessTools.Method(
+                        typeof(
+                            SubDestinationButton
+                        ),
+                        "OnButtonClicked"
+                    );
+
+                if (method ==
+                    null)
+                {
+                    throw new Exception(
+                        "SubDestinationButton.OnButtonClicked not found."
+                    );
+                }
+
+                Main.Log(
+                    "Port Services: Sleep clicked."
+                );
+
+                method.Invoke(
+                    sleepButton,
+                    null
+                );
+
+                routeWatcherCoroutine =
+                    StartCoroutine(
+                        WatchForSleepReturn()
+                    );
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Sleep failed: {ex}"
+                );
+
+                modRouteActive =
+                    false;
+
+                sleepRouteActive =
+                    false;
+
+                StopSpeedEffects();
+
+                if (routeWatcherCoroutine !=
+                    null)
+                {
+                    StopCoroutine(
+                        routeWatcherCoroutine
+                    );
+
+                    routeWatcherCoroutine =
+                        null;
+                }
+
+                OpenPortServicesOverlay();
+            }
+        }
+
+        public void ApplyConfiguredWakeTime()
+        {
+            if (!sleepRouteActive ||
+                GameManager.Instance ==
+                    null ||
+                GameManager.Instance.Time ==
+                    null)
+            {
+                return;
+            }
+
+            try
+            {
+                TimeController timeController =
+                    GameManager.Instance
+                        .Time;
+
+                float currentTime =
+                    timeController.Time;
+
+                float targetTime =
+                    wakeHourOptions[
+                        wakeHourIndex
+                    ] /
+                    24f;
+
+                float timeRemaining =
+                    targetTime -
+                    currentTime;
+
+                if (timeRemaining <=
+                    0.0001f)
+                {
+                    timeRemaining +=
+                        1f;
+                }
+
+                decimal remaining =
+                    (decimal)timeRemaining;
+
+                var remainingField =
+                    AccessTools.Field(
+                        typeof(TimeController),
+                        "timeRemainingToForcefullyPass"
+                    );
+
+                var totalField =
+                    AccessTools.Field(
+                        typeof(TimeController),
+                        "totalTimeToForcefullyPass"
+                    );
+
+                if (remainingField ==
+                        null ||
+                    totalField ==
+                        null)
+                {
+                    throw new Exception(
+                        "Sleep timing fields were not found."
+                    );
+                }
+
+                remainingField.SetValue(
+                    timeController,
+                    remaining
+                );
+
+                totalField.SetValue(
+                    timeController,
+                    remaining
+                );
+
+                Main.Log(
+                    $"Vanilla sleep target adjusted to {FormatWakeHour(wakeHourOptions[wakeHourIndex])}."
+                );
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Wake-time adjustment failed: {ex.Message}"
+                );
+            }
+        }
+
+        private void FindSleepButton()
+        {
+            sleepButton =
+                null;
+
+            if (currentDockUI ==
+                null)
+            {
+                return;
+            }
+
+            try
+            {
+                BoatActionsDestinationUI[]
+                    boatActionUIs =
+                        currentDockUI
+                            .GetComponentsInChildren<
+                                BoatActionsDestinationUI
+                            >(true);
+
+                foreach (BoatActionsDestinationUI
+                         boatActionUI in
+                         boatActionUIs)
+                {
+                    if (boatActionUI ==
+                        null)
+                    {
+                        continue;
+                    }
+
+                    SubDestinationButton button =
+                        boatActionUI
+                            .RestDestinationButton;
+
+                    if (button ==
+                            null ||
+                        !button.gameObject
+                            .activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    sleepButton =
+                        button;
+
+                    Main.Log(
+                        "Found live vanilla Sleep button."
+                    );
+
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Sleep button lookup failed: {ex.Message}"
+                );
+            }
+        }
+
+        private void FindStorageButton()
+        {
+            storageButton =
+                null;
+
+            if (currentDockUI ==
+                null)
+            {
+                return;
+            }
+
+            try
+            {
+                var field =
+                    AccessTools.Field(
+                        typeof(DockUI),
+                        "destinationButtons"
+                    );
+
+                List<DestinationButton> buttons =
+                    field !=
+                            null
+                        ? field.GetValue(
+                            currentDockUI
+                        ) as List<DestinationButton>
+                        : null;
+
+                if (buttons ==
+                    null)
+                {
+                    return;
+                }
+
+                foreach (DestinationButton button
+                         in buttons)
+                {
+                    if (button ==
+                            null ||
+                        !button.gameObject
+                            .activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    if (!(button.destination is
+                        StorageDestination))
+                    {
+                        continue;
+                    }
+
+                    storageButton =
+                        button;
+
+                    Main.Log(
+                        "Found live vanilla Storage button."
+                    );
+
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Storage button lookup failed: {ex.Message}"
+                );
+            }
+        }
+
+        private void FindResearchButton()
+        {
+            researchButton =
+                null;
+
+            if (currentDockUI ==
+                null)
+            {
+                return;
+            }
+
+            try
+            {
+                BoatActionsDestinationUI[]
+                    boatActionUIs =
+                        currentDockUI
+                            .GetComponentsInChildren<
+                                BoatActionsDestinationUI
+                            >(true);
+
+                foreach (BoatActionsDestinationUI
+                         boatActionUI in
+                         boatActionUIs)
+                {
+                    if (boatActionUI ==
+                        null)
+                    {
+                        continue;
+                    }
+
+                    SubDestinationButton button =
+                        boatActionUI
+                            .ResearchDestinationButton;
+
+                    if (button ==
+                            null ||
+                        !button.gameObject
+                            .activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    researchButton =
+                        button;
+
+                    Main.Log(
+                        "Found live vanilla Research button."
+                    );
+
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Research button lookup failed: {ex.Message}"
+                );
+            }
+        }
+
+        private void ActivateStorage()
+        {
+            FindStorageButton();
+
+            if (storageButton ==
+                null)
+            {
+                Main.Log(
+                    "Storage clicked, but no live StorageDestination was found."
+                );
+
+                return;
+            }
+
+            PortEntry entry =
+                new PortEntry();
+
+            entry.Label =
+                "Storage";
+
+            entry.Type =
+                PortEntryType.Destination;
+
+            entry.DestinationButton =
+                storageButton;
+
+            ActivateEntry(
+                entry
+            );
+        }
+
+        private void ActivateResearch()
+        {
+            FindResearchButton();
+
+            if (researchButton ==
+                null)
+            {
+                Main.Log(
+                    "Research clicked, but no live ResearchDestination was found."
+                );
+
+                return;
+            }
+
+            ActivateSubDestination(
+                researchButton,
+                "Research"
+            );
+        }
+
+        private void ActivateSubDestination(
+            SubDestinationButton button,
+            string label)
+        {
+            PlayVanillaUISound(
+                false
+            );
+
+            menuOpen =
+                false;
+
+            modRouteActive =
+                true;
+
+            sleepRouteActive =
+                false;
+
+            UnfreezeVanillaDockInput();
+
+            StopSpeedEffects();
+
+            if (routeWatcherCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    routeWatcherCoroutine
+                );
+            }
+
+            routeWatcherCoroutine =
+                StartCoroutine(
+                    WatchForVanillaReturn()
+                );
+
+            StartSpeedPulse(
+                ENTRY_SPEED_TIME
+            );
+
+            try
+            {
+                MethodInfo method =
+                    AccessTools.Method(
+                        typeof(
+                            SubDestinationButton
+                        ),
+                        "OnButtonClicked"
+                    );
+
+                if (method ==
+                    null)
+                {
+                    throw new Exception(
+                        "SubDestinationButton.OnButtonClicked not found."
+                    );
+                }
+
+                Main.Log(
+                    $"Port Services: {label} clicked."
+                );
+
+                method.Invoke(
+                    button,
+                    null
+                );
+
+                RecordServiceUse(
+                    label,
+                    false
+                );
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"{label} failed: {ex}"
+                );
+
+                modRouteActive =
+                    false;
+
+                StopSpeedEffects();
+
+                if (routeWatcherCoroutine !=
+                    null)
+                {
+                    StopCoroutine(
+                        routeWatcherCoroutine
+                    );
+
+                    routeWatcherCoroutine =
+                        null;
+                }
+
+                RefreshEntries();
+
+                OpenPortServicesOverlay();
+            }
+        }
+
+        private void ActivateLeavePort()
+        {
+            if (!PlayerIsDocked() ||
+                currentDockUI ==
+                    null)
+            {
+                return;
+            }
+
+            PlayVanillaUISound(
+                false
+            );
+
+            menuOpen =
+                false;
+
+            modRouteActive =
+                false;
+
+            sleepRouteActive =
+                false;
+
+            UnfreezeVanillaDockInput();
+
+            StopSpeedEffects();
+
+            if (routeWatcherCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    routeWatcherCoroutine
+                );
+
+                routeWatcherCoroutine =
+                    null;
+            }
+
+            try
+            {
+                Main.Log(
+                    "Port Services: Leave Port clicked."
+                );
+
+                currentDockUI
+                    .Leave();
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Leave Port failed: {ex}"
+                );
+
+                OpenPortServicesOverlay();
+            }
+        }
+
+        private void ActivateEntry(
+            PortEntry entry)
+        {
+            if (entry ==
+                null)
+            {
+                return;
+            }
+
+            PlayVanillaUISound(
+                false
+            );
+
+            menuOpen =
+                false;
+
+            modRouteActive =
+                true;
+
+            sleepRouteActive =
+                false;
+
+            UnfreezeVanillaDockInput();
+
+            StopSpeedEffects();
+
+            // Start return watcher before invoking vanilla.
+            if (routeWatcherCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    routeWatcherCoroutine
+                );
+            }
+
+            routeWatcherCoroutine =
+                StartCoroutine(
+                    WatchForVanillaReturn()
+                );
+
+            StartSpeedPulse(
+                ENTRY_SPEED_TIME
+            );
+
+            textCoroutine =
+                StartCoroutine(
+                    SkipTextWindow()
+                );
+
+            try
+            {
+                if (entry.Type ==
+                    PortEntryType.Destination)
+                {
+                    if (entry.DestinationButton ==
+                        null)
+                    {
+                        throw new Exception(
+                            "Destination button reference is missing."
+                        );
+                    }
+
+                    MethodInfo method =
+                        AccessTools.Method(
+                            typeof(
+                                DestinationButton
+                            ),
+                            "OnButtonClicked"
+                        );
+
+                    if (method ==
+                        null)
+                    {
+                        throw new Exception(
+                            "DestinationButton.OnButtonClicked not found."
+                        );
+                    }
+
+                    // EXACT VANILLA BUTTON.
+                    method.Invoke(
+                        entry.DestinationButton,
+                        null
+                    );
+                }
+                else
+                {
+                    if (entry.SpeakerButton ==
+                        null)
+                    {
+                        throw new Exception(
+                            "Speaker button reference is missing."
+                        );
+                    }
+
+                    MethodInfo method =
+                        AccessTools.Method(
+                            typeof(
+                                SpeakerButton
+                            ),
+                            "OnClick"
+                        );
+
+                    if (method ==
+                        null)
+                    {
+                        throw new Exception(
+                            "SpeakerButton.OnClick not found."
+                        );
+                    }
+
+                    // EXACT VANILLA SPEAKER BUTTON.
+                    method.Invoke(
+                        entry.SpeakerButton,
+                        null
+                    );
+                }
+
+                string destinationId =
+                    entry.DestinationButton !=
+                                null &&
+                            entry.DestinationButton
+                                .destination !=
+                                null
+                        ? entry.DestinationButton
+                            .destination
+                            .Id
+                        : string.Empty;
+
+                bool fishMarket =
+                    entry.Label.IndexOf(
+                        "fish",
+                        StringComparison
+                            .OrdinalIgnoreCase
+                    ) >=
+                        0 ||
+                    (!string.IsNullOrEmpty(
+                            destinationId) &&
+                     destinationId.IndexOf(
+                        "fish",
+                        StringComparison
+                            .OrdinalIgnoreCase
+                     ) >=
+                        0);
+
+                RecordServiceUse(
+                    entry.Label,
+                    fishMarket
+                );
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Port interaction failed: {entry.Label} | {ex}"
+                );
+
+                modRouteActive =
+                    false;
+
+                StopSpeedEffects();
+
+                if (routeWatcherCoroutine !=
+                    null)
+                {
+                    StopCoroutine(
+                        routeWatcherCoroutine
+                    );
+
+                    routeWatcherCoroutine =
+                        null;
+                }
+
+                // Vanilla dock never went away,
+                // so recovery is trivial.
+                RefreshEntries();
+
+                OpenPortServicesOverlay();
+            }
+        }
+
+        // =========================================================
+        // WATCH VANILLA INTERACTION
+        // =========================================================
+
+        private IEnumerator WatchForSleepReturn()
+        {
+            bool sleepStarted =
+                false;
+
+            float startDeadline =
+                Time.unscaledTime +
+                1.5f;
+
+            // Wait for DREDGE's real forced-time sleep process.
+            while (PlayerIsDocked() &&
+                   Time.unscaledTime <
+                    startDeadline)
+            {
+                TimeController timeController =
+                    GameManager.Instance !=
+                            null
+                        ? GameManager.Instance
+                            .Time
+                        : null;
+
+                if (timeController !=
+                        null &&
+                    timeController
+                        .IsTimePassingForcefully() &&
+                    timeController
+                        .CurrentTimePassageMode ==
+                            TimePassageMode.SLEEP)
+                {
+                    sleepStarted =
+                        true;
+
+                    break;
+                }
+
+                yield return null;
+            }
+
+            if (!sleepStarted)
+            {
+                Main.Log(
+                    "Fast sleep did not start. Recovering Port Services."
+                );
+
+                sleepRouteActive =
+                    false;
+
+                StopSpeedEffects();
+
+                yield return
+                    new WaitForSecondsRealtime(
+                        0.10f
+                    );
+
+                ReturnToPortServices();
+
+                routeWatcherCoroutine =
+                    null;
+
+                yield break;
+            }
+
+            Main.Log(
+                $"Sleep started at {sleepSpeedMultipliers[sleepSpeedIndex]:0}x speed, waking at {FormatWakeHour(wakeHourOptions[wakeHourIndex])}."
+            );
+
+            RecordCompletedSleep();
+
+            // Keep the boost active until DREDGE reports that its
+            // forced sleep-time passage has completely finished.
+            while (PlayerIsDocked())
+            {
+                TimeController timeController =
+                    GameManager.Instance !=
+                            null
+                        ? GameManager.Instance
+                            .Time
+                        : null;
+
+                if (timeController ==
+                        null ||
+                    !timeController
+                        .IsTimePassingForcefully())
+                {
+                    break;
+                }
+
+                yield return null;
+            }
+
+            EndSpeedBoost();
+
+            // HideCurrentDestination asks DockUI to rebuild after a
+            // vanilla 0.2 second delay. Do not harvest its lists until
+            // that rebuild has actually completed.
+            float dockReadyDeadline =
+                Time.unscaledTime +
+                1.5f;
+
+            while (PlayerIsDocked() &&
+                   !DockUiFinishedRebuilding() &&
+                   Time.unscaledTime <
+                    dockReadyDeadline)
+            {
+                currentDockUI =
+                    GameManager.Instance
+                        .UI
+                        .DockUI;
+
+                yield return null;
+            }
+
+            // Let all newly-created buttons finish OnEnable before
+            // RefreshEntries captures their live references.
+            yield return
+                new WaitForEndOfFrame();
+
+            yield return
+                new WaitForEndOfFrame();
+
+            if (!DockUiFinishedRebuilding())
+            {
+                Main.Log(
+                    "Dock rebuild wait timed out; refreshing available buttons anyway."
+                );
+            }
+
+            sleepRouteActive =
+                false;
+
+            if (modRouteActive &&
+                PlayerIsDocked())
+            {
+                ReturnToPortServices();
+            }
+
+            routeWatcherCoroutine =
+                null;
+        }
+
+        private IEnumerator WatchForVanillaReturn()
+        {
+            yield return null;
+            yield return null;
+
+            bool interactionStarted =
+                false;
+
+            float startDeadline =
+                Time.unscaledTime +
+                2.5f;
+
+            // =====================================================
+            // WAIT FOR STORE/DIALOGUE TO OPEN
+            // =====================================================
+
+            while (PlayerIsDocked())
+            {
+                bool dockShowing =
+                    DockWindowShowing();
+
+                bool dialogueShowing =
+                    DialogueShowing();
+
+                if (!dockShowing ||
+                    dialogueShowing)
+                {
+                    interactionStarted =
+                        true;
+
+                    break;
+                }
+
+                if (Time.unscaledTime >=
+                    startDeadline)
+                {
+                    break;
+                }
+
+                yield return null;
+            }
+
+            // If vanilla never visibly opened anything,
+            // recover our menu instead of getting stuck.
+            if (!interactionStarted)
+            {
+                Main.Log(
+                    "Interaction did not enter a detectable state. Recovering Port Services."
+                );
+
+                yield return
+                    new WaitForSecondsRealtime(
+                        0.15f
+                    );
+
+                ReturnToPortServices();
+
+                routeWatcherCoroutine =
+                    null;
+
+                yield break;
+            }
+
+            // =====================================================
+            // WAIT FOR VANILLA TO RETURN TO DOCK
+            // =====================================================
+
+            while (PlayerIsDocked())
+            {
+                bool dockShowing =
+                    DockWindowShowing();
+
+                bool dialogueShowing =
+                    DialogueShowing();
+
+                if (dockShowing &&
+                    !dialogueShowing)
+                {
+                    break;
+                }
+
+                yield return null;
+            }
+
+            if (!modRouteActive)
+            {
+                routeWatcherCoroutine =
+                    null;
+
+                yield break;
+            }
+
+            StartSpeedPulse(
+                EXIT_SPEED_TIME
+            );
+
+            yield return
+                new WaitForSecondsRealtime(
+                    EXIT_SPEED_TIME
+                );
+
+            yield return
+                new WaitForEndOfFrame();
+
+            ReturnToPortServices();
+
+            routeWatcherCoroutine =
+                null;
+        }
+
+        private void ReturnToPortServices()
+        {
+            if (!PlayerIsDocked())
+            {
+                return;
+            }
+
+            modRouteActive =
+                false;
+
+            sleepRouteActive =
+                false;
+
+            StopSpeedEffects();
+
+            currentDock =
+                GameManager.Instance
+                    .Player
+                    .CurrentDock;
+
+            currentDockUI =
+                GameManager.Instance
+                    .UI
+                    .DockUI;
+
+            // Vanilla dock is now alive again,
+            // so grab fresh live buttons.
+            RefreshEntries();
+
+            OpenPortServicesOverlay();
+        }
+
+        // =========================================================
+        // OPEN/CLOSE OUR OVERLAY
+        // =========================================================
+
+        public void OpenPortServices()
+        {
+            if (!PlayerIsDocked())
+            {
+                return;
+            }
+
+            currentDock =
+                GameManager.Instance
+                    .Player
+                    .CurrentDock;
+
+            currentDockUI =
+                GameManager.Instance
+                    .UI
+                    .DockUI;
+
+            RefreshEntries();
+
+            OpenPortServicesOverlay();
+        }
+
+        private void OpenPortServicesOverlay()
+        {
+            RefreshBackButtonLabel();
+
+            ChooseUndockMessage();
+
+            // A light vanilla selection cue makes the panel reveal
+            // feel native without overpowering the port ambience.
+            PlayVanillaUISound(
+                true
+            );
+
+            menuOpen =
+                true;
+
+            FreezeVanillaDockInput();
+
+            Main.Log(
+                $"Port Services open: {serviceEntries.Count} services, {peopleEntries.Count} people."
+            );
+        }
+
+        private void RefreshBackButtonLabel()
+        {
+            backButtonLabel =
+                "Back to Vanilla Port";
+
+            currentPortDisplayName =
+                "Unknown Port";
+
+            if (currentDock ==
+                    null ||
+                currentDock.Data ==
+                    null)
+            {
+                return;
+            }
+
+            currentPortDisplayName =
+                GetDockDisplayName(
+                    currentDock
+                );
+
+            if (!string.IsNullOrWhiteSpace(
+                currentPortDisplayName))
+            {
+                backButtonLabel =
+                    $"Back to {currentPortDisplayName}";
+            }
+        }
+
+        private string GetDockDisplayName(
+            Dock dock)
+        {
+            if (dock ==
+                    null ||
+                dock.Data ==
+                    null)
+            {
+                return "Unknown Port";
+            }
+
+            try
+            {
+                object dockData =
+                    dock.Data;
+
+                var dockNameProperty =
+                    AccessTools.Property(
+                        dockData.GetType(),
+                        "DockNameKey"
+                    );
+
+                object localizedString =
+                    dockNameProperty !=
+                            null
+                        ? dockNameProperty
+                            .GetValue(
+                                dockData,
+                                null
+                            )
+                        : null;
+
+                var localizedStringMethod =
+                    localizedString !=
+                            null
+                        ? AccessTools.Method(
+                            localizedString
+                                .GetType(),
+                            "GetLocalizedString",
+                            Type.EmptyTypes
+                        )
+                        : null;
+
+                string dockName =
+                    localizedStringMethod !=
+                            null
+                        ? localizedStringMethod
+                            .Invoke(
+                                localizedString,
+                                null
+                            ) as string
+                        : null;
+
+                if (!string.IsNullOrWhiteSpace(
+                    dockName))
+                {
+                    return dockName;
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Dock name localization failed: {ex.Message}"
+                );
+            }
+
+            if (!string.IsNullOrWhiteSpace(
+                dock.Data.Id))
+            {
+                return CleanName(
+                    dock.Data.Id
+                );
+            }
+
+            return "Unknown Port";
+        }
+
+        private void ChooseUndockMessage()
+        {
+            if (undockMessages ==
+                    null ||
+                undockMessages.Length ==
+                    0)
+            {
+                currentUndockMessage =
+                    string.Empty;
+
+                return;
+            }
+
+            int index =
+                UnityEngine.Random.Range(
+                    0,
+                    undockMessages.Length
+                );
+
+            if (undockMessages.Length >
+                    1 &&
+                index ==
+                    lastUndockMessageIndex)
+            {
+                index =
+                    (index +
+                    UnityEngine.Random.Range(
+                        1,
+                        undockMessages.Length
+                    )) %
+                    undockMessages.Length;
+            }
+
+            lastUndockMessageIndex =
+                index;
+
+            currentUndockMessage =
+                undockMessages[
+                    index
+                ];
+        }
+
+        private void ClosePortServicesToVanilla()
+        {
+            PlayVanillaUISound(
+                false
+            );
+
+            menuOpen =
+                false;
+
+            showCaptainsLog =
+                false;
+
+            confirmResetStats =
+                false;
+
+            modRouteActive =
+                false;
+
+            sleepRouteActive =
+                false;
+
+            UnfreezeVanillaDockInput();
+
+            StopSpeedEffects();
+
+            if (routeWatcherCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    routeWatcherCoroutine
+                );
+
+                routeWatcherCoroutine =
+                    null;
+            }
+
+            // Nothing else required.
+            //
+            // The entire point of this build:
+            // vanilla was NEVER hidden or destroyed.
+            Main.Log(
+                "Returned to vanilla port."
+            );
+        }
+
+        // =========================================================
+        // HARVEST EXACT LIVE BUTTONS
+        // =========================================================
+
+        private void RefreshEntries()
+        {
+            serviceEntries.Clear();
+
+            peopleEntries.Clear();
+
+            if (currentDockUI ==
+                null)
+            {
+                return;
+            }
+
+            HarvestDestinations();
+
+            FindSleepButton();
+
+            FindStorageButton();
+
+            FindResearchButton();
+
+            HarvestSpeakers();
+        }
+
+        private void HarvestDestinations()
+        {
+            var field =
+                AccessTools.Field(
+                    typeof(DockUI),
+                    "destinationButtons"
+                );
+
+            if (field ==
+                null)
+            {
+                return;
+            }
+
+            List<DestinationButton>
+                buttons =
+                    field.GetValue(
+                        currentDockUI
+                    )
+                    as List<
+                        DestinationButton
+                    >;
+
+            if (buttons ==
+                null)
+            {
+                return;
+            }
+
+            foreach (
+                DestinationButton button
+                in buttons)
+            {
+                if (button ==
+                    null)
+                {
+                    continue;
+                }
+
+                if (button ==
+                    LauncherButton)
+                {
+                    continue;
+                }
+
+                if (!button.gameObject
+                    .activeInHierarchy)
+                {
+                    continue;
+                }
+
+                BaseDestination destination =
+                    button.destination;
+
+                if (destination ==
+                    null)
+                {
+                    continue;
+                }
+
+                // =================================================
+                // VANILLA-ONLY THINGS
+                // =================================================
+
+                if (destination is
+                    StorageDestination)
+                {
+                    continue;
+                }
+
+                if (destination is
+                    OverflowStorageDestination)
+                {
+                    continue;
+                }
+
+                if (destination is
+                    RestDestination)
+                {
+                    continue;
+                }
+
+                if (destination is
+                    ResearchDestination)
+                {
+                    continue;
+                }
+
+                if (destination is
+                    UndockDestination)
+                {
+                    continue;
+                }
+
+                string label =
+                    GetDestinationLabel(
+                        button,
+                        destination
+                    );
+
+                PortEntry entry =
+                    new PortEntry();
+
+                entry.Label =
+                    label;
+
+                entry.Type =
+                    PortEntryType.Destination;
+
+                entry.DestinationButton =
+                    button;
+
+                if (destination is
+                    CharacterDestination)
+                {
+                    if (!EntryAlreadyPresent(
+                        peopleEntries,
+                        entry))
+                    {
+                        peopleEntries.Add(
+                            entry
+                        );
+                    }
+                }
+                else
+                {
+                    if (!EntryAlreadyPresent(
+                        serviceEntries,
+                        entry))
+                    {
+                        serviceEntries.Add(
+                            entry
+                        );
+                    }
+                }
+            }
+        }
+
+        private void HarvestSpeakers()
+        {
+            Transform container =
+                GetSpeakerContainer();
+
+            if (container ==
+                null)
+            {
+                return;
+            }
+
+            foreach (
+                Transform child
+                in container)
+            {
+                if (child ==
+                    null)
+                {
+                    continue;
+                }
+
+                if (!child.gameObject
+                    .activeInHierarchy)
+                {
+                    continue;
+                }
+
+                SpeakerButton button =
+                    child.GetComponent<
+                        SpeakerButton
+                    >();
+
+                if (button ==
+                    null)
+                {
+                    continue;
+                }
+
+                string label =
+                    GetSpeakerLabel(
+                        button
+                    );
+
+                // Avoid duplicates with CharacterDestination.
+                bool duplicate =
+                    peopleEntries.Any(
+                        p =>
+                            string.Equals(
+                                p.Label,
+                                label,
+                                StringComparison
+                                    .OrdinalIgnoreCase
+                            )
+                    );
+
+                if (duplicate)
+                {
+                    continue;
+                }
+
+                PortEntry entry =
+                    new PortEntry();
+
+                entry.Label =
+                    label;
+
+                entry.Type =
+                    PortEntryType.Speaker;
+
+                entry.SpeakerButton =
+                    button;
+
+                peopleEntries.Add(
+                    entry
+                );
+            }
+        }
+
+        private bool EntryAlreadyPresent(
+            List<PortEntry> entries,
+            PortEntry candidate)
+        {
+            return
+                entries.Any(
+                    existing =>
+                        existing.Type ==
+                            candidate.Type &&
+                        existing.DestinationButton ==
+                            candidate.DestinationButton &&
+                        existing.SpeakerButton ==
+                            candidate.SpeakerButton
+                );
+        }
+
+        // =========================================================
+        // LABELS
+        // =========================================================
+
+        private string GetDestinationLabel(
+            DestinationButton button,
+            BaseDestination destination)
+        {
+            try
+            {
+                var field =
+                    AccessTools.Field(
+                        typeof(
+                            DestinationButton
+                        ),
+                        "textField"
+                    );
+
+                if (field !=
+                    null)
+                {
+                    object textObject =
+                        field.GetValue(
+                            button
+                        );
+
+                    if (textObject !=
+                        null)
+                    {
+                        var property =
+                            AccessTools.Property(
+                                textObject
+                                    .GetType(),
+                                "text"
+                            );
+
+                        if (property !=
+                            null)
+                        {
+                            string text =
+                                property.GetValue(
+                                    textObject,
+                                    null
+                                )
+                                as string;
+
+                            if (!string
+                                .IsNullOrWhiteSpace(
+                                    text
+                                ))
+                            {
+                                return text;
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            if (destination !=
+                    null &&
+                !string.IsNullOrWhiteSpace(
+                    destination.Id))
+            {
+                return CleanName(
+                    destination.Id
+                );
+            }
+
+            return "Service";
+        }
+
+        private Transform GetSpeakerContainer()
+        {
+            try
+            {
+                var field =
+                    AccessTools.Field(
+                        typeof(DockUI),
+                        "speakerButtonContainer"
+                    );
+
+                if (field ==
+                    null)
+                {
+                    return null;
+                }
+
+                return
+                    field.GetValue(
+                        currentDockUI
+                    )
+                    as Transform;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private string GetSpeakerLabel(
+            SpeakerButton button)
+        {
+            try
+            {
+                Component[] components =
+                    button
+                        .GetComponentsInChildren<
+                            Component
+                        >(true);
+
+                foreach (
+                    Component component
+                    in components)
+                {
+                    if (component ==
+                        null)
+                    {
+                        continue;
+                    }
+
+                    var property =
+                        AccessTools.Property(
+                            component.GetType(),
+                            "text"
+                        );
+
+                    if (property ==
+                        null)
+                    {
+                        continue;
+                    }
+
+                    string text =
+                        property.GetValue(
+                            component,
+                            null
+                        )
+                        as string;
+
+                    if (!string
+                        .IsNullOrWhiteSpace(
+                            text
+                        ))
+                    {
+                        return text;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return CleanName(
+                button.gameObject.name
+            );
+        }
+
+        private string CleanName(
+            string value)
+        {
+            if (string
+                .IsNullOrWhiteSpace(
+                    value))
+            {
+                return "Unknown";
+            }
+
+            string result =
+                value;
+
+            if (result.Contains(
+                "."))
+            {
+                string[] sections =
+                    result.Split(
+                        '.'
+                    );
+
+                result =
+                    sections[
+                        sections.Length -
+                        1
+                    ];
+            }
+
+            result =
+                result.Replace(
+                    "_",
+                    " "
+                );
+
+            result =
+                result.Replace(
+                    "-",
+                    " "
+                );
+
+            return result;
+        }
+
+        // =========================================================
+        // SPEED
+        // =========================================================
+
+        private void StartSpeedPulse(
+            float duration)
+        {
+            if (speedCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    speedCoroutine
+                );
+            }
+
+            speedCoroutine =
+                StartCoroutine(
+                    SpeedPulse(
+                        duration
+                    )
+                );
+        }
+
+        private IEnumerator SpeedPulse(
+            float duration)
+        {
+            BeginSpeedBoost(
+                FAST_SPEED
+            );
+
+            yield return
+                new WaitForSecondsRealtime(
+                    duration
+                );
+
+            EndSpeedBoost();
+
+            speedCoroutine =
+                null;
+        }
+
+        private void BeginSpeedBoost(
+            float multiplier)
+        {
+            if (speedBoostActive)
+            {
+                EndSpeedBoost();
+            }
+
+            oldTimeScale =
+                Time.timeScale;
+
+            float baseScale =
+                oldTimeScale;
+
+            if (baseScale <=
+                0f)
+            {
+                baseScale =
+                    1f;
+            }
+
+            speedBoostActive =
+                true;
+
+            Time.timeScale =
+                baseScale *
+                multiplier;
+        }
+
+        private void EndSpeedBoost()
+        {
+            if (!speedBoostActive)
+            {
+                return;
+            }
+
+            Time.timeScale =
+                oldTimeScale;
+
+            speedBoostActive =
+                false;
+        }
+
+        private void StopSpeedEffects()
+        {
+            if (speedCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    speedCoroutine
+                );
+
+                speedCoroutine =
+                    null;
+            }
+
+            if (textCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    textCoroutine
+                );
+
+                textCoroutine =
+                    null;
+            }
+
+            EndSpeedBoost();
+        }
+
+        // =========================================================
+        // TEXT SPEED
+        // =========================================================
+
+        private IEnumerator SkipTextWindow()
+        {
+            float until =
+                Time.unscaledTime +
+                TEXT_SKIP_TIME;
+
+            while (
+                Time.unscaledTime <
+                until)
+            {
+                SkipFebucciText();
+
+                yield return null;
+            }
+
+            textCoroutine =
+                null;
+        }
+
+        private void SkipFebucciText()
+        {
+            try
+            {
+                MonoBehaviour[]
+                    behaviours =
+                        UnityEngine.Object
+                            .FindObjectsOfType<
+                                MonoBehaviour
+                            >();
+
+                foreach (
+                    MonoBehaviour behaviour
+                    in behaviours)
+                {
+                    if (behaviour ==
+                        null)
+                    {
+                        continue;
+                    }
+
+                    if (!behaviour
+                        .isActiveAndEnabled)
+                    {
+                        continue;
+                    }
+
+                    Type type =
+                        behaviour
+                            .GetType();
+
+                    string fullName =
+                        type.FullName;
+
+                    if (string
+                        .IsNullOrEmpty(
+                            fullName))
+                    {
+                        continue;
+                    }
+
+                    if (!fullName
+                        .StartsWith(
+                            "Febucci.",
+                            StringComparison
+                                .Ordinal))
+                    {
+                        continue;
+                    }
+
+                    MethodInfo method =
+                        type.GetMethod(
+                            "SkipTypewriter",
+                            BindingFlags.Instance |
+                            BindingFlags.Public |
+                            BindingFlags.NonPublic,
+                            null,
+                            Type.EmptyTypes,
+                            null
+                        );
+
+                    if (method ==
+                        null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        method.Invoke(
+                            behaviour,
+                            null
+                        );
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        // =========================================================
+        // LAUNCHER
+        // =========================================================
+
+        public void PositionLauncher(
+            DestinationButton launcher)
+        {
+            if (launcher ==
+                null)
+            {
+                return;
+            }
+
+            if (!launcherPositionValid ||
+                Time.unscaledTime >=
+                    nextLauncherPositionCheck)
+            {
+                cachedLauncherPosition =
+                    FindSafeLauncherPosition(
+                        launcher
+                    );
+
+                launcherPositionValid =
+                    true;
+
+                nextLauncherPositionCheck =
+                    Time.unscaledTime +
+                    LAUNCHER_POSITION_CHECK_INTERVAL;
+
+                // Keep our launcher last in the vanilla destination
+                // container so equal-canvas elements draw beneath it.
+                try
+                {
+                    launcher.transform
+                        .SetAsLastSibling();
+                }
+                catch
+                {
+                }
+            }
+
+            launcher.transform.position =
+                cachedLauncherPosition;
+        }
+
+        private Vector3 FindSafeLauncherPosition(
+            DestinationButton launcher)
+        {
+            Vector3 fallback =
+                new Vector3(
+                    Screen.width *
+                        0.5f,
+                    Screen.height *
+                        0.34f,
+                    0f
+                );
+
+            if (currentDockUI ==
+                null)
+            {
+                return fallback;
+            }
+
+            try
+            {
+                List<Rect> occupied =
+                    new List<Rect>();
+
+                DestinationButton[]
+                    destinationButtons =
+                        currentDockUI
+                            .GetComponentsInChildren<
+                                DestinationButton
+                            >(true);
+
+                foreach (DestinationButton button
+                         in destinationButtons)
+                {
+                    if (button ==
+                            null ||
+                        button ==
+                            launcher ||
+                        !button.gameObject
+                            .activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    AddOccupiedButtonRect(
+                        button,
+                        occupied
+                    );
+                }
+
+                SubDestinationButton[]
+                    subDestinationButtons =
+                        currentDockUI
+                            .GetComponentsInChildren<
+                                SubDestinationButton
+                            >(true);
+
+                foreach (SubDestinationButton button
+                         in subDestinationButtons)
+                {
+                    if (button ==
+                            null ||
+                        !button.gameObject
+                            .activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    AddOccupiedButtonRect(
+                        button,
+                        occupied
+                    );
+                }
+
+                SpeakerButton[] speakerButtons =
+                    currentDockUI
+                        .GetComponentsInChildren<
+                            SpeakerButton
+                        >(true);
+
+                foreach (SpeakerButton button
+                         in speakerButtons)
+                {
+                    if (button ==
+                            null ||
+                        !button.gameObject
+                            .activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    AddOccupiedButtonRect(
+                        button,
+                        occupied
+                    );
+                }
+
+                Rect launcherBounds =
+                    GetScreenRect(
+                        launcher
+                    );
+
+                float launcherWidth =
+                    Mathf.Clamp(
+                        launcherBounds.width,
+                        110f,
+                        340f
+                    );
+
+                float launcherHeight =
+                    Mathf.Clamp(
+                        launcherBounds.height,
+                        70f,
+                        150f
+                    );
+
+                Vector2 pivot =
+                    new Vector2(
+                        0.5f,
+                        0.5f
+                    );
+
+                RectTransform launcherRectTransform =
+                    launcher.transform
+                        as RectTransform;
+
+                if (launcherRectTransform !=
+                    null)
+                {
+                    pivot =
+                        launcherRectTransform
+                            .pivot;
+                }
+
+                Vector3 bestPosition =
+                    fallback;
+
+                float bestOverlap =
+                    float.MaxValue;
+
+                foreach (Vector2 anchor
+                         in launcherCandidateAnchors)
+                {
+                    Vector3 candidatePosition =
+                        new Vector3(
+                            Screen.width *
+                                anchor.x,
+                            Screen.height *
+                                anchor.y,
+                            0f
+                        );
+
+                    Rect candidateRect =
+                        new Rect(
+                            candidatePosition.x -
+                                (launcherWidth *
+                                pivot.x),
+                            candidatePosition.y -
+                                (launcherHeight *
+                                pivot.y),
+                            launcherWidth,
+                            launcherHeight
+                        );
+
+                    if (candidateRect.xMin <
+                            20f ||
+                        candidateRect.xMax >
+                            Screen.width -
+                            20f ||
+                        candidateRect.yMin <
+                            90f ||
+                        candidateRect.yMax >
+                            Screen.height -
+                            120f)
+                    {
+                        continue;
+                    }
+
+                    float totalOverlap =
+                        0f;
+
+                    foreach (Rect occupiedRect
+                             in occupied)
+                    {
+                        float overlapWidth =
+                            Mathf.Max(
+                                0f,
+                                Mathf.Min(
+                                    candidateRect.xMax,
+                                    occupiedRect.xMax
+                                ) -
+                                Mathf.Max(
+                                    candidateRect.xMin,
+                                    occupiedRect.xMin
+                                )
+                            );
+
+                        float overlapHeight =
+                            Mathf.Max(
+                                0f,
+                                Mathf.Min(
+                                    candidateRect.yMax,
+                                    occupiedRect.yMax
+                                ) -
+                                Mathf.Max(
+                                    candidateRect.yMin,
+                                    occupiedRect.yMin
+                                )
+                            );
+
+                        totalOverlap +=
+                            overlapWidth *
+                            overlapHeight;
+                    }
+
+                    if (totalOverlap <=
+                        0f)
+                    {
+                        return candidatePosition;
+                    }
+
+                    if (totalOverlap <
+                        bestOverlap)
+                    {
+                        bestOverlap =
+                            totalOverlap;
+
+                        bestPosition =
+                            candidatePosition;
+                    }
+                }
+
+                return bestPosition;
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Adaptive launcher placement failed: {ex.Message}"
+                );
+
+                return fallback;
+            }
+        }
+
+        private void AddOccupiedButtonRect(
+            Component component,
+            List<Rect> occupied)
+        {
+            Rect rect =
+                GetScreenRect(
+                    component
+                );
+
+            const float padding =
+                18f;
+
+            occupied.Add(
+                new Rect(
+                    rect.xMin -
+                        padding,
+                    rect.yMin -
+                        padding,
+                    rect.width +
+                        (padding *
+                        2f),
+                    rect.height +
+                        (padding *
+                        2f)
+                )
+            );
+        }
+
+        private Rect GetScreenRect(
+            Component component)
+        {
+            RectTransform rectTransform =
+                component !=
+                        null
+                    ? component.transform
+                        as RectTransform
+                    : null;
+
+            if (rectTransform ==
+                null)
+            {
+                Vector3 position =
+                    component !=
+                            null
+                        ? component.transform
+                            .position
+                        : Vector3.zero;
+
+                return new Rect(
+                    position.x -
+                        80f,
+                    position.y -
+                        40f,
+                    160f,
+                    80f
+                );
+            }
+
+            Vector3[] corners =
+                new Vector3[4];
+
+            rectTransform.GetWorldCorners(
+                corners
+            );
+
+            float minX =
+                corners.Min(
+                    corner =>
+                        corner.x
+                );
+
+            float maxX =
+                corners.Max(
+                    corner =>
+                        corner.x
+                );
+
+            float minY =
+                corners.Min(
+                    corner =>
+                        corner.y
+                );
+
+            float maxY =
+                corners.Max(
+                    corner =>
+                        corner.y
+                );
+
+            float width =
+                maxX -
+                minX;
+
+            float height =
+                maxY -
+                minY;
+
+            if (width <
+                    1f ||
+                height <
+                    1f)
+            {
+                Vector3 position =
+                    rectTransform.position;
+
+                return new Rect(
+                    position.x -
+                        80f,
+                    position.y -
+                        40f,
+                    160f,
+                    80f
+                );
+            }
+
+            return Rect.MinMaxRect(
+                minX,
+                minY,
+                maxX,
+                maxY
+            );
+        }
+
+        private void SelfHealLauncher()
+        {
+            if (menuOpen ||
+                modRouteActive)
+            {
+                return;
+            }
+
+            if (Time.unscaledTime <
+                nextLauncherCheck)
+            {
+                return;
+            }
+
+            nextLauncherCheck =
+                Time.unscaledTime +
+                LAUNCHER_CHECK_INTERVAL;
+
+            if (!PlayerIsDocked())
+            {
+                return;
+            }
+
+            if (currentDockUI ==
+                null)
+            {
+                currentDockUI =
+                    GameManager.Instance
+                        .UI
+                        .DockUI;
+            }
+
+            if (!DockWindowShowing() ||
+                DialogueShowing())
+            {
+                return;
+            }
+
+            bool missing =
+                LauncherButton ==
+                    null ||
+                LauncherButton.gameObject ==
+                    null ||
+                !LauncherButton
+                    .gameObject
+                    .activeInHierarchy;
+
+            if (missing)
+            {
+                CreateOrRefreshLauncher(
+                    currentDockUI
+                );
+            }
+        }
+
+        private void CreateOrRefreshLauncher(
+            DockUI dockUI)
+        {
+            GameObject existing =
+                FindExistingLauncher(
+                    dockUI
+                );
+
+            if (existing !=
+                null)
+            {
+                DestinationButton
+                    existingButton =
+                        existing.GetComponent<
+                            DestinationButton
+                        >();
+
+                if (existingButton !=
+                    null)
+                {
+                    LauncherButton =
+                        existingButton;
+
+                    launcherPositionValid =
+                        false;
+
+                    nextLauncherPositionCheck =
+                        0f;
+
+                    SetLauncherText(
+                        "Port Services"
+                    );
+
+                    ApplyCustomIcon(
+                        existingButton
+                    );
+
+                    return;
+                }
+            }
+
+            var prefabField =
+                AccessTools.Field(
+                    typeof(DockUI),
+                    "destinationButtonPrefab"
+                );
+
+            var containerField =
+                AccessTools.Field(
+                    typeof(DockUI),
+                    "destinationButtonContainer"
+                );
+
+            if (prefabField ==
+                    null ||
+                containerField ==
+                    null)
+            {
+                return;
+            }
+
+            GameObject prefab =
+                prefabField.GetValue(
+                    dockUI
+                )
+                as GameObject;
+
+            Transform container =
+                containerField.GetValue(
+                    dockUI
+                )
+                as Transform;
+
+            if (prefab ==
+                    null ||
+                container ==
+                    null)
+            {
+                return;
+            }
+
+            GameObject launcherObject =
+                UnityEngine.Object.Instantiate(
+                    prefab,
+                    container
+                );
+
+            launcherObject.name =
+                "CombinedServices.PortServicesLauncher";
+
+            DestinationButton launcher =
+                launcherObject.GetComponent<
+                    DestinationButton
+                >();
+
+            if (launcher ==
+                null)
+            {
+                UnityEngine.Object.Destroy(
+                    launcherObject
+                );
+
+                return;
+            }
+
+            LauncherButton =
+                launcher;
+
+            launcherPositionValid =
+                false;
+
+            nextLauncherPositionCheck =
+                0f;
+
+            PrepareLauncher(
+                launcher
+            );
+
+            AddLauncherForCleanup(
+                dockUI,
+                launcherObject
+            );
+
+            SetLauncherText(
+                "Port Services"
+            );
+
+            ApplyCustomIcon(
+                launcher
+            );
+        }
+
+        private GameObject FindExistingLauncher(
+            DockUI dockUI)
+        {
+            var field =
+                AccessTools.Field(
+                    typeof(DockUI),
+                    "destinationButtonObjects"
+                );
+
+            if (field ==
+                null)
+            {
+                return null;
+            }
+
+            List<GameObject> objects =
+                field.GetValue(
+                    dockUI
+                )
+                as List<GameObject>;
+
+            if (objects ==
+                null)
+            {
+                return null;
+            }
+
+            foreach (
+                GameObject obj
+                in objects)
+            {
+                if (obj ==
+                    null)
+                {
+                    continue;
+                }
+
+                if (obj.name ==
+                    "CombinedServices.PortServicesLauncher")
+                {
+                    return obj;
+                }
+            }
+
+            return null;
+        }
+
+        private void PrepareLauncher(
+            DestinationButton launcher)
+        {
+            try
+            {
+                var field =
+                    AccessTools.Field(
+                        typeof(
+                            DestinationButton
+                        ),
+                        "destinationLocalizedString"
+                    );
+
+                Behaviour behaviour =
+                    field.GetValue(
+                        launcher
+                    )
+                    as Behaviour;
+
+                if (behaviour !=
+                    null)
+                {
+                    behaviour.enabled =
+                        false;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var field =
+                    AccessTools.Field(
+                        typeof(
+                            DestinationButton
+                        ),
+                        "questAttentionCallout"
+                    );
+
+                GameObject quest =
+                    field.GetValue(
+                        launcher
+                    )
+                    as GameObject;
+
+                if (quest !=
+                    null)
+                {
+                    quest.SetActive(
+                        false
+                    );
+                }
+            }
+            catch
+            {
+            }
+
+            ApplyCustomIcon(
+                launcher
+            );
+        }
+
+        private void ApplyCustomIcon(
+            DestinationButton launcher)
+        {
+            if (launcher ==
+                null)
+            {
+                return;
+            }
+
+            try
+            {
+                var field =
+                    AccessTools.Field(
+                        typeof(
+                            DestinationButton
+                        ),
+                        "icon"
+                    );
+
+                object iconObject =
+                    field.GetValue(
+                        launcher
+                    );
+
+                if (iconObject ==
+                    null)
+                {
+                    return;
+                }
+
+                Behaviour behaviour =
+                    iconObject
+                    as Behaviour;
+
+                if (customIconSprite ==
+                    null)
+                {
+                    if (behaviour !=
+                        null)
+                    {
+                        behaviour.enabled =
+                            false;
+                    }
+
+                    return;
+                }
+
+                var property =
+                    AccessTools.Property(
+                        iconObject.GetType(),
+                        "sprite"
+                    );
+
+                if (property !=
+                    null)
+                {
+                    property.SetValue(
+                        iconObject,
+                        customIconSprite,
+                        null
+                    );
+                }
+
+                if (behaviour !=
+                    null)
+                {
+                    behaviour.enabled =
+                        true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void AddLauncherForCleanup(
+            DockUI dockUI,
+            GameObject launcherObject)
+        {
+            try
+            {
+                var field =
+                    AccessTools.Field(
+                        typeof(DockUI),
+                        "destinationButtonObjects"
+                    );
+
+                List<GameObject>
+                    objects =
+                        field.GetValue(
+                            dockUI
+                        )
+                        as List<GameObject>;
+
+                if (objects !=
+                        null &&
+                    !objects.Contains(
+                        launcherObject))
+                {
+                    objects.Add(
+                        launcherObject
+                    );
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void SetLauncherText(
+            string text)
+        {
+            if (LauncherButton ==
+                null)
+            {
+                return;
+            }
+
+            try
+            {
+                var field =
+                    AccessTools.Field(
+                        typeof(
+                            DestinationButton
+                        ),
+                        "textField"
+                    );
+
+                object textObject =
+                    field.GetValue(
+                        LauncherButton
+                    );
+
+                if (textObject ==
+                    null)
+                {
+                    return;
+                }
+
+                var property =
+                    AccessTools.Property(
+                        textObject.GetType(),
+                        "text"
+                    );
+
+                if (property !=
+                    null)
+                {
+                    property.SetValue(
+                        textObject,
+                        text,
+                        null
+                    );
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        // =========================================================
+        // DOCK SETUP
+        // =========================================================
+
+        public void OnDockUIShown(
+            DockUI dockUI,
+            Dock dock)
+        {
+            if (dockUI ==
+                    null ||
+                dock ==
+                    null)
+            {
+                return;
+            }
+
+            if (!portVisitRecordedForCurrentDock)
+            {
+                RecordPortVisit(
+                    dock
+                );
+
+                portVisitRecordedForCurrentDock =
+                    true;
+            }
+
+            currentDockUI =
+                dockUI;
+
+            currentDock =
+                dock;
+
+            if (setupCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    setupCoroutine
+                );
+            }
+
+            setupCoroutine =
+                StartCoroutine(
+                    SetupDock(
+                        dockUI,
+                        dock
+                    )
+                );
+        }
+
+        private IEnumerator SetupDock(
+            DockUI dockUI,
+            Dock dock)
+        {
+            if (setupRunning)
+            {
+                yield break;
+            }
+
+            setupRunning =
+                true;
+
+            yield return
+                new WaitForEndOfFrame();
+
+            yield return
+                new WaitForEndOfFrame();
+
+            if (!PlayerIsDocked() ||
+                GameManager.Instance.Player
+                    .CurrentDock !=
+                    dock)
+            {
+                setupRunning =
+                    false;
+
+                setupCoroutine =
+                    null;
+
+                yield break;
+            }
+
+            currentDockUI =
+                dockUI;
+
+            currentDock =
+                dock;
+
+            CreateOrRefreshLauncher(
+                dockUI
+            );
+
+            // Only harvest while vanilla dock is live.
+            if (DockWindowShowing())
+            {
+                RefreshEntries();
+            }
+
+            setupRunning =
+                false;
+
+            setupCoroutine =
+                null;
+        }
+
+        // =========================================================
+        // FORGE
+        // =========================================================
+
+        private void CheckForgeSequence()
+        {
+            if (!Input.anyKeyDown)
+            {
+                return;
+            }
+
+            KeyCode expected =
+                forgeSequence[
+                    forgePosition
+                ];
+
+            if (Input.GetKeyDown(
+                expected))
+            {
+                forgePosition++;
+
+                if (forgePosition >=
+                    forgeSequence.Length)
+                {
+                    forgePosition =
+                        0;
+
+                    showForgeMessage =
+                        true;
+
+                    forgeMessageUntil =
+                        Time.unscaledTime +
+                        4f;
+
+                    Main.Log(
+                        "FORGE WAS HERE."
+                    );
+                }
+
+                return;
+            }
+
+            if (Input.GetMouseButtonDown(
+                    0) ||
+                Input.GetMouseButtonDown(
+                    1) ||
+                Input.GetMouseButtonDown(
+                    2))
+            {
+                return;
+            }
+
+            forgePosition =
+                0;
+        }
+
+        private void DrawForgeMessage()
+        {
+            float width =
+                Mathf.Min(
+                    600f,
+                    Screen.width *
+                    0.70f
+                );
+
+            float height =
+                90f;
+
+            float x =
+                (Screen.width -
+                width) /
+                2f;
+
+            float y =
+                (Screen.height *
+                0.67f) +
+                48f;
+
+            GUIStyle title =
+                new GUIStyle(
+                    GUI.skin.label
+                );
+
+            title.alignment =
+                TextAnchor.MiddleCenter;
+
+            title.fontSize =
+                Mathf.RoundToInt(
+                    Mathf.Clamp(
+                        Screen.height *
+                        0.035f,
+                        20f,
+                        38f
+                    )
+                );
+
+            title.fontStyle =
+                FontStyle.Bold;
+
+            title.normal.textColor =
+                Color.red;
+
+            GUIStyle subtitle =
+                new GUIStyle(
+                    GUI.skin.label
+                );
+
+            subtitle.alignment =
+                TextAnchor.MiddleCenter;
+
+            subtitle.fontSize =
+                Mathf.RoundToInt(
+                    Mathf.Clamp(
+                        Screen.height *
+                        0.020f,
+                        14f,
+                        24f
+                    )
+                );
+
+            subtitle.fontStyle =
+                FontStyle.Italic;
+
+            subtitle.normal.textColor =
+                Color.red;
+
+            GUI.Label(
+                new Rect(
+                    x,
+                    y,
+                    width,
+                    height *
+                    0.55f
+                ),
+                "FORGE WAS HERE",
+                title
+            );
+
+            GUI.Label(
+                new Rect(
+                    x,
+                    y +
+                    (height *
+                    0.48f),
+                    width,
+                    height *
+                    0.40f
+                ),
+                "Built in the shed. Tested at sea.",
+                subtitle
+            );
+        }
+
+        // =========================================================
+        // ART
+        // =========================================================
+
+        private void LoadCustomIcon()
+        {
+            if (customIconLoadAttempted)
+            {
+                return;
+            }
+
+            customIconLoadAttempted =
+                true;
+
+            try
+            {
+                string path =
+                    Path.Combine(
+                        Environment.CurrentDirectory,
+                        "Mods",
+                        "dredd.combinedservices",
+                        "portservices.png"
+                    );
+
+                if (!File.Exists(
+                    path))
+                {
+                    return;
+                }
+
+                byte[] data =
+                    File.ReadAllBytes(
+                        path
+                    );
+
+                customIconTexture =
+                    new Texture2D(
+                        2,
+                        2,
+                        TextureFormat.ARGB32,
+                        false
+                    );
+
+                if (!ImageConversion
+                    .LoadImage(
+                        customIconTexture,
+                        data))
+                {
+                    return;
+                }
+
+                customIconSprite =
+                    Sprite.Create(
+                        customIconTexture,
+                        new Rect(
+                            0f,
+                            0f,
+                            customIconTexture
+                                .width,
+                            customIconTexture
+                                .height
+                        ),
+                        new Vector2(
+                            0.5f,
+                            0.5f
+                        ),
+                        100f
+                    );
+            }
+            catch (Exception ex)
+            {
+                Main.Log(
+                    $"Artwork error: {ex.Message}"
+                );
+            }
+        }
+
+        // =========================================================
+        // DESTINATION CLOSED
+        // =========================================================
+
+        public void OnDestinationClosed()
+        {
+            if (!modRouteActive)
+            {
+                return;
+            }
+
+            if (sleepRouteActive)
+            {
+                return;
+            }
+
+            StartSpeedPulse(
+                EXIT_SPEED_TIME
+            );
+        }
+
+        // =========================================================
+        // RESET
+        // =========================================================
+
+        public void ResetForNextDock()
+        {
+            UnfreezeVanillaDockInput();
+
+            StopSpeedEffects();
+
+            if (routeWatcherCoroutine !=
+                null)
+            {
+                StopCoroutine(
+                    routeWatcherCoroutine
+                );
+
+                routeWatcherCoroutine =
+                    null;
+            }
+
+            menuOpen =
+                false;
+
+            showCaptainsLog =
+                false;
+
+            confirmResetStats =
+                false;
+
+            portVisitRecordedForCurrentDock =
+                false;
+
+            modRouteActive =
+                false;
+
+            sleepRouteActive =
+                false;
+
+            setupRunning =
+                false;
+
+            LauncherButton =
+                null;
+
+            launcherPositionValid =
+                false;
+
+            nextLauncherPositionCheck =
+                0f;
+
+            currentDock =
+                null;
+
+            currentDockUI =
+                null;
+
+            backButtonLabel =
+                "Back to Vanilla Port";
+
+            currentPortDisplayName =
+                "Unknown Port";
+
+            serviceEntries.Clear();
+
+            peopleEntries.Clear();
+
+            sleepButton =
+                null;
+
+            storageButton =
+                null;
+
+            researchButton =
+                null;
+
+            setupCoroutine =
+                null;
+
+            forgePosition =
+                0;
+
+            showForgeMessage =
+                false;
+        }
+
+        private void OnDestroy()
+        {
+            UnfreezeVanillaDockInput();
+            EndSpeedBoost();
+        }
+    }
+
+    // =============================================================
+    // HARMONY
+    // =============================================================
+
+    [HarmonyPatch(
+        typeof(DestinationButton),
+        "OnButtonClicked"
+    )]
+    public static class DestinationButtonClickPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix(
+            DestinationButton __instance)
+        {
+            CombinedServicesBehaviour instance =
+                CombinedServicesBehaviour
+                    .Instance;
+
+            if (instance ==
+                null)
+            {
+                return true;
+            }
+
+            if (CombinedServicesBehaviour
+                    .LauncherButton ==
+                __instance)
+            {
+                instance
+                    .OpenPortServices();
+
+                return false;
+            }
+
+            // While our overlay is open, do not let a hidden
+            // vanilla destination button receive a click.
+            if (instance
+                .ShouldBlockVanillaButtonClicks())
+            {
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    [HarmonyPatch(
+        typeof(SpeakerButton),
+        "OnClick"
+    )]
+    public static class SpeakerButtonClickPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix()
+        {
+            CombinedServicesBehaviour instance =
+                CombinedServicesBehaviour
+                    .Instance;
+
+            if (instance ==
+                null)
+            {
+                return true;
+            }
+
+            return !instance
+                .ShouldBlockVanillaButtonClicks();
+        }
+    }
+
+    [HarmonyPatch(
+        typeof(SubDestinationButton),
+        "OnButtonClicked"
+    )]
+    public static class SubDestinationButtonClickPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix()
+        {
+            CombinedServicesBehaviour instance =
+                CombinedServicesBehaviour
+                    .Instance;
+
+            if (instance ==
+                null)
+            {
+                return true;
+            }
+
+            return !instance
+                .ShouldBlockVanillaButtonClicks();
+        }
+    }
+
+    [HarmonyPatch(
+        typeof(RestDestinationUI),
+        "ShowMainUI"
+    )]
+    public static class RestDestinationUIShowPatch
+    {
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            if (CombinedServicesBehaviour
+                    .Instance !=
+                null)
+            {
+                CombinedServicesBehaviour
+                    .Instance
+                    .ApplyConfiguredWakeTime();
+            }
+        }
+    }
+
+    [HarmonyPatch(
+        typeof(DestinationButton),
+        "LateUpdate"
+    )]
+    public static class DestinationButtonPositionPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix(
+            DestinationButton __instance)
+        {
+            if (CombinedServicesBehaviour
+                    .LauncherButton !=
+                __instance)
+            {
+                return true;
+            }
+
+            CombinedServicesBehaviour instance =
+                CombinedServicesBehaviour
+                    .Instance;
+
+            if (instance !=
+                null)
+            {
+                instance
+                    .PositionLauncher(
+                        __instance
+                    );
+            }
+
+            return false;
+        }
+    }
+
+    [HarmonyPatch(
+        typeof(DockUI),
+        nameof(DockUI.Show)
+    )]
+    public static class DockUIShowPatch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(
+            DockUI __instance,
+            Dock dock)
+        {
+            if (dock ==
+                null)
+            {
+                return;
+            }
+
+            if (CombinedServicesBehaviour
+                    .Instance !=
+                null)
+            {
+                CombinedServicesBehaviour
+                    .Instance
+                    .OnDockUIShown(
+                        __instance,
+                        dock
+                    );
+            }
+        }
+    }
+
+    [HarmonyPatch(
+        typeof(UIController),
+        nameof(
+            UIController
+                .HideCurrentDestination
+        )
+    )]
+    public static class HideCurrentDestinationPatch
+    {
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            if (CombinedServicesBehaviour
+                    .Instance !=
+                null)
+            {
+                CombinedServicesBehaviour
+                    .Instance
+                    .OnDestinationClosed();
+            }
+        }
+    }
+
+    [HarmonyPatch(
+        typeof(DockUI),
+        nameof(DockUI.Leave)
+    )]
+    public static class DockUILeavePatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix()
+        {
+            CombinedServicesBehaviour instance =
+                CombinedServicesBehaviour
+                    .Instance;
+
+            if (instance ==
+                null)
+            {
+                return true;
+            }
+
+            if (instance
+                .ShouldBlockUndock())
+            {
+                Main.Log(
+                    "DockUI.Leave blocked while Port Services was open."
+                );
+
+                return false;
+            }
+
+            instance
+                .ResetForNextDock();
+
+            return true;
+        }
+    }
+}
